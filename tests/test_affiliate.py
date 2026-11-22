@@ -508,3 +508,43 @@ def test_agent_fund_never_negative(db):
     assert rows[0].delta_fen == 20000
     assert agent.fund_fen == 20000
     assert commission_for_order(db, order.no) == []
+
+
+def test_locked_attribution_repurchase_after_90_days_pays_commission(db):
+    """Round-2 fix: 90 days is only the candidate window; a lock is long-term."""
+    promo_user, promo = make_promoter(db, code="TCH-LOCKED", level="basic")
+    customer = make_user(db)
+    bind_referrer(db, user_id=customer.id, code="TCH-LOCKED")
+    confirm_attribution(db, user_id=customer.id)
+    paid_order(db, customer, PERSONAL)  # first valid order locks the attribution
+
+    locked = db.query(Attribution).filter_by(user_id=customer.id).one()
+    assert locked.locked_at is not None
+    locked_at = locked.locked_at
+    # candidate_at is frozen at lock time; simulate 90+ days elapsing.
+    locked.candidate_at = utcnow() - timedelta(days=91)
+    db.flush()
+
+    repurchase = paid_order(db, customer, PERSONAL, event_id="e2")
+    entries = commission_for_order(db, repurchase.no)
+    assert len(entries) == 1  # the repurchase price is 55920
+    assert entries[0].promoter_id == promo.id
+    assert entries[0].amount_fen == 55920 * 10 // 100  # basic repurchase 10%
+    assert (
+        db.query(Attribution).filter_by(user_id=customer.id).one().locked_at == locked_at
+    )
+
+    # Advanced promoter keeps its 15% repurchase rate on a long-term lock too.
+    _, advanced = make_promoter(db, code="TCH-LOCKED-ADV", level="advanced")
+    buyer = make_user(db)
+    bind_referrer(db, user_id=buyer.id, code="TCH-LOCKED-ADV")
+    confirm_attribution(db, user_id=buyer.id)
+    paid_order(db, buyer, PERSONAL, event_id="e1")
+    attr = db.query(Attribution).filter_by(user_id=buyer.id).one()
+    attr.candidate_at = utcnow() - timedelta(days=91)
+    db.flush()
+    repurchase2 = paid_order(db, buyer, PERSONAL, event_id="e2")
+    adv_entry = next(
+        e for e in commission_for_order(db, repurchase2.no) if e.promoter_id == advanced.id
+    )
+    assert adv_entry.amount_fen == 55920 * 15 // 100

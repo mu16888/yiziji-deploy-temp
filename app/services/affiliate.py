@@ -337,8 +337,9 @@ def apply_order_commission(db: Session, *, order: Order) -> list[CommissionEntry
 
     Returns the newly created (or previously existing) commission entries.
     Agency and agent-admission orders pay no commission; the ¥199 package
-    locks attribution and grants invite credits but pays no cash. Expired or
-    self-referred attributions earn nothing at all.
+    locks attribution and grants invite credits but pays no cash. Expired
+    candidates and self-referred attributions earn nothing at all; locked
+    attributions remain long-term.
     """
     if is_agency_order(order):
         _debit_agency_fund(db, order)
@@ -352,9 +353,11 @@ def apply_order_commission(db: Session, *, order: Order) -> list[CommissionEntry
     attribution = db.query(Attribution).filter_by(user_id=order.user_id).first()
     if attribution is None or not is_confirmed(attribution):
         return []
-    # candidate_at is the authoritative clock: a confirmed-but-stale candidate
-    # can neither lock nor accrue (confirmation never resets the 90 days).
-    if is_candidate_expired(attribution.candidate_at):
+    # candidate_at is the authoritative clock ONLY while still a candidate.
+    # A confirmed-but-stale candidate can neither lock nor accrue, but once an
+    # attribution is locked the relationship is long-term (§5.6) and repurchase
+    # commission must keep flowing even though candidate_at is never updated.
+    if not is_locked(attribution) and is_candidate_expired(attribution.candidate_at):
         return []
     _lock_attribution(db, attribution, order)
     if not is_locked(attribution):
