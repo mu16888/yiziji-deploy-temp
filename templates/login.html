@@ -54,6 +54,9 @@
         const data = await r.json();
         msg.style.color = r.ok ? '#1a7f37' : '#c0392b';
         msg.textContent = r.ok ? '登录成功，欢迎回来！' : (data.detail || '登录失败');
+        if (r.ok) {
+          window.location.href = '/workbench';
+        }
       } catch (err) {
         msg.textContent = '网络错误';
       }
