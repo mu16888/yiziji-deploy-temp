@@ -1,0 +1,74 @@
+# 一条命令起全栈：docker compose up --build -d
+# 然后：curl -s localhost/health  →  {"status":"ok"}
+# 不存在的环境变量走冒号后的默认值，因此无需 .env 也能本地跑通。
+x-app-env: &app-env
+  DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/app.db}
+  SECRET_KEY: ${SECRET_KEY:-dev-secret-change-me}
+  # 适配器选择：mock | wechat / mock | openmaic_http
+  PAYMENT_GATEWAY: ${PAYMENT_GATEWAY:-mock}
+  GENERATION_ADAPTER: ${GENERATION_ADAPTER:-mock}
+  OPENMAIC_URL: ${OPENMAIC_URL:-}
+  # 微信支付 / 登录为占位实现，生产需填真实商户凭证（见 README）。
+  WECHAT_APP_ID: ${WECHAT_APP_ID:-wx-fake-app-id}
+  WECHAT_MCH_ID: ${WECHAT_MCH_ID:-fake-mch-id}
+  WECHAT_API_V3_KEY: ${WECHAT_API_V3_KEY:-fake-api-v3-key}
+  WECHAT_NOTIFY_URL: ${WECHAT_NOTIFY_URL:-}
+  # 积分 / 退款
+  CREDIT_EXPIRE_DAYS: ${CREDIT_EXPIRE_DAYS:-730}
+  RENEW_MODE: ${RENEW_MODE:-all_active}
+  REFUND_MODE: ${REFUND_MODE:-unused_only}
+  # 推广 / 提现
+  COMMISSION_OBSERVATION_DAYS: ${COMMISSION_OBSERVATION_DAYS:-15}
+  MIN_WITHDRAW_FEN: ${MIN_WITHDRAW_FEN:-10000}
+  SELF_REFERRAL_CHECK: ${SELF_REFERRAL_CHECK:-off}
+  # 合规 / 分享
+  AIGC_LABEL: ${AIGC_LABEL:-true}
+  AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-190}
+  SHARE_LINK_TTL_DAYS: ${SHARE_LINK_TTL_DAYS:-7}
+  # 其它
+  VERIFY_CODE_DEV: ${VERIFY_CODE_DEV:-123456}
+  WORKER_POLL_SEC: ${WORKER_POLL_SEC:-5}
+
+services:
+  # Web + API：启动时自动迁移 + 幂等播种，再起 uvicorn。
+  app:
+    build: .
+    restart: unless-stopped
+    environment: *app-env
+    volumes:
+      - appdata:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  # 生成 worker：消费 queued/running 的备课任务，结算或退款积分。
+  # 生产可换成 Celery/Redis，GenerationAdapter 接口不变。
+  worker:
+    build: .
+    restart: unless-stopped
+    environment: *app-env
+    command: ["python", "-m", "app.workers.worker"]
+    volumes:
+      - appdata:/app/data
+    depends_on:
+      app:
+        condition: service_healthy
+
+  # 反向代理：静态资源直出，其余代理到 app:8000；对外只暴露 80。
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-80}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./static:/var/www/static:ro
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  appdata:
