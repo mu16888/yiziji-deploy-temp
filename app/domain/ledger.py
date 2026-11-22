@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import func, update
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -40,16 +40,6 @@ class ReservationNotFound(LedgerError):
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def _current_balance(db: Session, user_id: int, pool: str) -> int:
-    """Balance from the ledger (source of truth), optionally for one pool."""
-    return int(
-        db.query(func.coalesce(func.sum(CreditEntry.delta), 0))
-        .filter(CreditEntry.user_id == user_id, CreditEntry.pool == pool)
-        .scalar()
-        or 0
-    )
 
 
 def _write_entry(
@@ -289,9 +279,24 @@ def refund_unused(
     pool = lots[0].pool if lots else _POOL_UNIVERSAL
     granted = sum(int(e.delta) for e in lots)
 
-    # Credits are fungible: unused credits from this lot cannot exceed what it
-    # granted nor the credits still held in the pool (FIFO consumption).
-    unused = min(granted, max(0, _current_balance(db, user_id, pool))) if lots else 0
+    # Credits are consumed oldest-lot-first, so bound the refund by *this
+    # order's own lots* still-unused credits -- not by the whole pool balance,
+    # which would hand one order another order's unused credits (over-refund).
+    unused = 0
+    if lots:
+        pool_lots = (
+            db.query(CreditEntry)
+            .filter(
+                CreditEntry.user_id == user_id,
+                CreditEntry.pool == pool,
+                CreditEntry.delta > 0,
+                CreditEntry.entry_type.in_(_GRANT_TYPES),
+            )
+            .order_by(CreditEntry.id)
+            .all()
+        )
+        remaining = _lot_remaining(db, user_id, pool, pool_lots)
+        unused = min(granted, sum(remaining.get(lot.id, 0) for lot in lots))
 
     fen = 0
     if settings.refund_mode == "unused_only" and granted > 0 and unused > 0:

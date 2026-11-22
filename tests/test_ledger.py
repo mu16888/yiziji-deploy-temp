@@ -165,6 +165,29 @@ def test_refund_after_spend_never_negative(db):
     assert db.query(CreditEntry).filter_by(idempotency_key="refund:ORD-1").count() == 1
 
 
+def test_refund_unused_per_lot_not_pool_balance(db):
+    """A refund returns only its own lot's unused credits, not the whole pool's."""
+    _order(db, "ORD-A", 1, paid_fen=10000)
+    _order(db, "ORD-B", 1, paid_fen=20000)
+    append_entry(db, user_id=1, delta=100, entry_type="purchase", ref_type="order",
+                 ref_id="ORD-A", idempotency_key="purchase:ORD-A")
+    append_entry(db, user_id=1, delta=100, entry_type="purchase", ref_type="order",
+                 ref_id="ORD-B", idempotency_key="purchase:ORD-B")
+    db.commit()
+
+    reserve(db, user_id=1, amount=50, ref_type="job", ref_id="job-1",
+            idempotency_key="reserve:job-1")
+    db.commit()
+    assert get_balance(db, 1) == 150
+
+    # FIFO spends the older lot A first: A has 50 unused, B still has 100.
+    assert refund_unused(db, order_no="ORD-A", idempotency_key="refund:ORD-A") == 5000
+    db.commit()
+    assert refund_unused(db, order_no="ORD-B", idempotency_key="refund:ORD-B") == 20000
+    db.commit()
+    assert get_balance(db, 1) == 150  # refund markers never freeze or drain credits
+
+
 def test_renew_extends_active_lots_only(db):
     """One active lot + one expired lot: only the active lot's expiry changes."""
     now = _now()
