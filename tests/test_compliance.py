@@ -9,17 +9,23 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
+from app.db import Base, get_db
 from app.domain.generation import complete_job, create_job
 from app.domain.ledger import append_entry
-from app.models import AigcAudit, GenerationJob
+from app.main import app
+from app.models import AigcAudit, AuditLog, GenerationJob, Product, User
 from app.models.base import utcnow
 from app.services import compliance
+from app.services.auth import issue_token
 from app.services.compliance import mark_aigc
+from app.services.orders import confirm_payment, create_order
 from scripts.purge_logs import main as purge_logs_main
+from scripts.seed import PRODUCTS
 
 
 # --- fixtures -----------------------------------------------------------------
@@ -40,6 +46,44 @@ def db(engine):
     session = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
     yield session
     session.close()
+
+
+@pytest.fixture()
+def audit_db(tmp_path):
+    """DB with seeded products/users for exercising real money/admin flows."""
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'audit-trail.db'}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine, autoflush=False, autocommit=False)()
+    for data in PRODUCTS:
+        session.add(Product(**data))
+    session.add_all(
+        [
+            User(phone="13900000003", display_name="admin", role="admin", is_active=True),
+            User(phone="13800000001", display_name="user", role="user", is_active=True),
+        ]
+    )
+    session.commit()
+    yield session
+    session.close()
+    engine.dispose()
+
+
+@pytest.fixture()
+def admin_client(audit_db):
+    def override_get_db():
+        yield audit_db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as client:
+            admin = audit_db.query(User).filter_by(role="admin").one()
+            client.headers.update({"Authorization": f"Bearer {issue_token(admin)}"})
+            yield client
+    finally:
+        app.dependency_overrides.clear()
 
 
 class FakeAdapter:
@@ -130,11 +174,45 @@ def test_generation_completion_records_aigc_audit(db):
     assert done.result["aigc_label"] is True
 
 
+def test_money_admin_operations_write_audit_trail(audit_db, admin_client):
+    """Money/admin writes are audited in the dedicated AuditLog table (T5/T6/T9).
+
+    AigcAudit is reserved for AIGC label events; this test verifies the two
+    audit stores are not conflated and that both money paths leave a trail.
+    """
+    admin = audit_db.query(User).filter_by(role="admin").one()
+    user = audit_db.query(User).filter_by(role="user").one()
+
+    # Order fulfillment (money operation) -> entitlement grant audit row.
+    order = create_order(audit_db, user_id=user.id, sku="pkg_personal_699",
+                         channel="native")
+    confirm_payment(audit_db, order_no=order.no, event_id="audit-evt",
+                    paid_amount_fen=69900)
+    grant = audit_db.query(AuditLog).filter_by(action="bonus:grant").one()
+    assert grant.target_id == str(user.id)
+    assert grant.after["sku"] == "pkg_personal_699"
+
+    # Admin credit adjustment (money + admin operation) -> audited with reason.
+    resp = admin_client.post(
+        "/admin/credits/adjust",
+        json={"user_id": user.id, "delta": 50, "reason": "manual grant"},
+    )
+    assert resp.status_code == 200
+    adjust = audit_db.query(AuditLog).filter_by(action="admin:credit_adjust").one()
+    assert adjust.actor_id == admin.id
+    assert adjust.reason == "manual grant"
+    assert adjust.after["delta"] == 50
+
+    # No money/admin event was duplicated into the AIGC-specific audit table.
+    assert audit_db.query(AigcAudit).count() == 0
+
+
 # --- retention / CLI ----------------------------------------------------------
 
 
 def test_audit_retention(db):
-    retention = settings.audit_retention_days  # verbatim default: 190
+    retention = settings.audit_retention_days
+    assert retention == 190  # pin the brief's literal default, not just "whatever settings says"
     expired = compliance.record_audit(
         db, actor_id=1, action="expired", payload={"k": "old"}
     )
