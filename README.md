@@ -86,7 +86,7 @@ pytest tests/test_e2e_own_generation.py -v   # 自有生成闭环验收（fake L
 |---|---|---|
 | `DATABASE_URL` | `sqlite:///./app.db` | 换成 `postgresql://user:pwd@host:5432/db` 即切 PostgreSQL |
 | `SECRET_KEY` | `dev-secret-change-me` | JWT HS256 签名密钥；**生产必须改** |
-| `PAYMENT_GATEWAY` | `mock` | `mock` 或 `wechat`（见 §6） |
+| `PAYMENT_GATEWAY` | `mock` | `mock` 或 `wechat`（见 §5） |
 | `GENERATION_ADAPTER` | `mock` | `mock`（本地零依赖）或 `deepseek`（自有生成，见 §4） |
 | `DEEPSEEK_API_KEY` | 空 | 底层 LLM 的 key，**仅从环境变量读取，不进代码/仓库** |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com` | 兼容 OpenAI 协议的端点，可换其他厂商 |
