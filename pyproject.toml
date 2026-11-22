@@ -1,0 +1,20 @@
+[project]
+name = "ai-monetization-template"
+version = "0.1.0"
+description = "Reusable AI-tool monetization template (FastAPI + Jinja2 + SQLite/Postgres)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "sqlalchemy>=2",
+    "pydantic-settings",
+    "alembic",
+    "pytest",
+    "httpx",
+    "jinja2",
+    "python-multipart",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
