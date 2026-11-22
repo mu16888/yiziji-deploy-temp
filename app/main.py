@@ -10,6 +10,7 @@ from app.api.auth import router as auth_router
 from app.api.catalog import pages_router as catalog_pages_router
 from app.api.catalog import router as catalog_router
 from app.api.credits import router as credits_router
+from app.api.ingest import router as ingest_router
 from app.api.jobs import router as jobs_router
 from app.api.pages import router as pages_router
 from app.api.pay import router as pay_router
@@ -22,6 +23,7 @@ app.add_middleware(CSRFMiddleware)
 app.include_router(auth_router)
 app.include_router(auth_pages_router)
 app.include_router(credits_router)
+app.include_router(ingest_router)
 app.include_router(pay_router)
 app.include_router(catalog_router)
 app.include_router(catalog_pages_router)

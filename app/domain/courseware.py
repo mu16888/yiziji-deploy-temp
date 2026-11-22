@@ -3,8 +3,10 @@
 DeepSeek (or any future vendor) is only a replaceable ``LLMClient`` that follows
 instructions and returns a JSON object. Every orchestration decision here is
 ours: prompt templates, scene-by-scene retry/degradation, assembly and the
-Courseware schema. The prompt shapes/system messages are the ones proven by
-``scripts/validate_real_generation.py`` against the real API.
+Courseware schema. The shipped orchestration is exercised against the real API
+by ``scripts/validate_real_generation.py`` (which calls :func:`build_courseware`
+directly); the observed result is recorded in
+``docs/superpowers/specs/2026-11-22-真实验证结果.md``.
 
 Pure domain module: no FastAPI, no DB, no network. Callers inject the LLM.
 """
@@ -18,7 +20,7 @@ SCHEMA_VERSION = "1.0"
 SCENE_TYPES = frozenset({"slide", "quiz", "discussion"})
 AIGC_LABEL = "AI辅助生成"
 
-# --- validated prompts (see scripts/validate_real_generation.py) --------------
+# --- prompt templates (exercised by scripts/validate_real_generation.py) ------
 
 UNDERSTANDING_SYSTEM = "你是资深初中数学老师。严格只输出 JSON，不要 Markdown 围栏。"
 SCENE_PLAN_SYSTEM = "你是资深老师，设计一节课的场景。严格只输出 JSON 对象，不要 Markdown 围栏。"
@@ -229,6 +231,38 @@ def _aigc_metadata(llm: LLMClient) -> dict:
     return {"label": AIGC_LABEL, "provider": str(provider), "model": str(model)}
 
 
+def _scene_is_usable(scene: dict) -> bool:
+    """A generated scene must carry at least one piece of real teaching content."""
+    return bool(
+        scene.get("title", "").strip()
+        or scene.get("narration", "").strip()
+        or any(str(b).strip() for b in scene.get("bullets", []))
+    )
+
+
+def _extract_quiz(obj) -> list:
+    """Validate the quiz phase output and require >= 3 usable choice questions.
+
+    Design wants 3-5 questions. Empty `{}` items or lists with fewer than three
+    real questions are rejected so the caller can retry once, then fail the
+    whole job (fatal phase -> refund) rather than ship an empty quiz.
+    """
+    if not isinstance(obj, dict):
+        raise CoursewareError("quiz phase did not return an object")
+    quiz = obj.get("quiz", [])
+    if not isinstance(quiz, list):
+        raise CoursewareError("quiz.quiz must be a list")
+    normalized = validate_courseware({"quiz": quiz})["quiz"]
+    usable = [
+        q
+        for q in normalized
+        if q["question"].strip() and len(q["options"]) >= 2
+    ]
+    if len(usable) < 3:
+        raise CoursewareError("quiz phase yielded fewer than 3 usable questions")
+    return usable
+
+
 def _generate_scene(llm: LLMClient, text: str, plan: dict, *, fail_fast: bool) -> dict:
     """Generate one scene; retry once, then degrade (unless fail_fast)."""
     prompt = _scene_prompt(plan, text)
@@ -241,7 +275,13 @@ def _generate_scene(llm: LLMClient, text: str, plan: dict, *, fail_fast: bool) -
             inner = obj.get("scene")
             if isinstance(inner, dict):
                 obj = inner
-            return validate_courseware({"scenes": [obj]})["scenes"][0]
+            scene = validate_courseware({"scenes": [obj]})["scenes"][0]
+            # A `{}` response validates to a blank slide. That is a failed
+            # generation, not a real scene: treat it as an attempt failure so the
+            # retry -> degraded-placeholder path kicks in (students see a marker).
+            if not _scene_is_usable(scene):
+                raise CoursewareError("scene response was empty")
+            return scene
         except Exception as exc:  # noqa: BLE001 - any scene failure is degradable
             last_error = exc
 
@@ -305,17 +345,17 @@ def build_courseware(
         for plan in plans[:max_scenes]
     ]
 
-    try:
-        quiz_obj = llm.complete_json(QUIZ_SYSTEM, _quiz_prompt(text))
-        if not isinstance(quiz_obj, dict):
-            raise CoursewareError("quiz phase did not return an object")
-        quiz = quiz_obj.get("quiz", [])
-        if not isinstance(quiz, list):
-            raise CoursewareError("quiz.quiz must be a list")
-    except CoursewareError:
-        raise
-    except Exception as exc:
-        raise CoursewareError(f"quiz phase failed: {exc}") from exc
+    quiz: list | None = None
+    last_quiz_error: Exception | None = None
+    for _ in range(2):  # initial attempt + exactly one retry
+        try:
+            quiz = _extract_quiz(llm.complete_json(QUIZ_SYSTEM, _quiz_prompt(text)))
+            break
+        except Exception as exc:  # noqa: BLE001 - a bad quiz response is retryable
+            last_quiz_error = exc
+    if quiz is None:
+        # Fatal phase: the upper layer fails the job and refunds the reservation.
+        raise CoursewareError(f"quiz phase failed: {last_quiz_error}")
 
     draft = {
         "version": SCHEMA_VERSION,

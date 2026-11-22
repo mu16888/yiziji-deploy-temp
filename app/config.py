@@ -41,7 +41,6 @@ class Settings(BaseSettings):
 
     # Auth / generation / worker
     verify_code_dev: str = "123456"
-    openmaic_url: str = ""
     worker_poll_sec: int = 5
 
     # DeepSeek LLM (self-owned generation; replaceable backend)

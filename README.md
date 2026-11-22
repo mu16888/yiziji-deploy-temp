@@ -129,6 +129,12 @@ Courseware（自定义 schema v1.0：version/title/scenes/quiz/aigc）
 学生互动课堂 /c/{share_code}（服务端 Jinja2 + 原生 JS，旁白/要点/答题）
 ```
 
+讲义输入有两条路径：① **API 上传**——`POST /api/ingest`（multipart，字段名 `file`）调用
+`app/services/ingest.py::extract_text` 提取纯文本，支持 txt/md/pdf/docx（扩展名白名单、
+大小上限；非法文件返回 400），响应为 `{"text": "..."}`；② **直接粘贴文本**——调用方把
+文本放进 job spec 的 `material_text`（或 `text`）。完整「生成页文件上传 UI」尚未接线，
+属于后续工作（见 §4.5）。
+
 **护城河是自研编排 + Courseware 格式**，不是任何一个外部开源项目：提示词模板、场景级重试与降级、schema 校验、积分预扣/多退少补、AIGC 打标、分享链路都在本仓库内，换掉底层 LLM 不影响产品。
 
 ### 4.2 本地默认（mock）
@@ -154,6 +160,8 @@ DEEPSEEK_MODEL=deepseek-chat
 
 - **单 worker 同步阻塞**：`DeepSeekGenerationAdapter.submit` 在当前 worker 进程内同步跑完整编排；生成期间该 worker 的队列被占用，并发任务会排队。生产应把生成放进真正的任务队列（Celery/Redis 等），worker 只做状态收敛。
 - **进程内结果注册表重启即丢失**：适配器用内存 `dict` 按 `external_id` 缓存结果；worker 重启或多 worker 共享 DB 时，注册表丢失会让任务停在 `running`（已刻意设计为不结算空结果，避免误收费），需由持有结果的 worker 重新提交。生产应把结果持久化到 DB/对象存储。
+- **计价按课件类型、与场景降级无关**：价格由 `estimate` 按 basic / interactive / PBL 本地规则预估；单场景生成失败降级为占位**不降价也不触发部分退款**，只有整篇编排失败（理解/大纲/测验阶段抛错）才全额退积分。不做按成功场景数的细粒度结算。
+- **生成页文件上传 UI 未接线**：目前只有 `POST /api/ingest` 上传 API 与「粘贴文本进 job spec」两条输入路径。若两者都未提供文本，`DeepSeekGenerationAdapter` 会退回内置的 **DEMO 默认讲义**（一元二次方程示例）以保证 demo 可跑；生产接入务必传入真实讲义。
 - **key 由使用者提供**：`DEEPSEEK_API_KEY` 不随模板分发，生产需自行妥善保管并遵守所选模型厂商的服务条款与配额。
 
 ---
@@ -231,6 +239,7 @@ docker compose logs -f app worker nginx
 |---|---|
 | `docs/README.md` | 设计包索引 |
 | `docs/superpowers/specs/2026-11-22-ai-tool-monetization-template-design.md` | 设计全文（§1–§14） |
+| `docs/superpowers/specs/2026-11-22-真实验证结果.md` | 真实 DeepSeek 对上线 `build_courseware` 的验证结果（6 条标准） |
 | `docs/superpowers/plans/2026-11-22-ai-monetization-template.md` | T1–T12 实施计划 |
 | `docs/data-model.md` | 数据表与金额/幂等约定 |
 | `docs/state-machines.md` | 订单、任务、归因状态机 |
@@ -247,5 +256,6 @@ docker compose logs -f app worker nginx
 - 开发验证码固定于 `VERIFY_CODE_DEV`，生产需接短信/邮件。
 - 队列为 DB-backed 轮询；高并发请换 Celery/Redis；生成为单 worker 同步执行，详见 §4.5。
 - 生成结果注册表在进程内，重启/多 worker 场景需持久化，详见 §4.5。
+- 计价按课件类型（basic/interactive/PBL），单场景降级不改变价格、不做按场景数结算；生成页上传 UI 未接线，缺省时用 DEMO 默认讲义，详见 §4.5。
 - DeepSeek key 由使用者提供，不随模板分发，详见 §4.3 与 `.env.deepseek.howto.md`。
 - 不做多租户、订阅制、小程序虚拟支付。

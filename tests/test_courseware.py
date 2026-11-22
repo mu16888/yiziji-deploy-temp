@@ -73,6 +73,7 @@ def _scene(i):
 
 
 def _quiz():
+    # The quiz phase requires at least 3 usable single-choice questions.
     return {
         "quiz": [
             {
@@ -86,6 +87,12 @@ def _quiz():
                 "options": ["A", "B", "C", "D"],
                 "answer": 1,
                 "explain": "因为B。",
+            },
+            {
+                "question": "值域？",
+                "options": ["A", "B", "C", "D"],
+                "answer": 2,
+                "explain": "因为C。",
             },
         ]
     }
@@ -153,7 +160,7 @@ def test_single_scene_failure_degrades():
     # Earlier and later scenes/quiz are unaffected; overall build succeeds.
     assert cw["scenes"][0]["title"] == "场景1"
     assert cw["scenes"][1]["title"] == "场景2"
-    assert len(cw["quiz"]) == 2
+    assert len(cw["quiz"]) == 3
     assert len(llm.calls) == 7  # 1 retry for the failing scene only
 
 
@@ -174,6 +181,50 @@ def test_understanding_failure_propagates():
 
 def test_quiz_failure_propagates():
     steps = [_understanding(), _outline(1), _scene(1), RuntimeError("quiz down")]
+    with pytest.raises(CoursewareError):
+        build_courseware("函数的概念", FakeLLM(steps))
+
+
+# --- empty / malformed content must not ship as valid --------------------------
+
+
+def test_empty_scene_object_degrades():
+    """An LLM returning `{}` for a scene is retried, then degraded (not a blank slide)."""
+    steps = [_understanding(), _outline(1), {}, {}, _quiz()]
+    llm = FakeLLM(steps)
+    cw = build_courseware("函数的概念", llm)
+
+    assert cw["scenes"][0]["degraded"] is True
+    assert cw["scenes"][0]["title"] == "（生成失败）"
+    assert len(llm.calls) == 5  # scene attempted twice, then placeholder
+
+
+def test_empty_quiz_list_retries_then_fails_whole_job():
+    """`{"quiz": []}` twice is fatal -> CoursewareError -> upper layer refunds."""
+    steps = [_understanding(), _outline(1), _scene(1), {"quiz": []}, {"quiz": []}]
+    llm = FakeLLM(steps)
+    with pytest.raises(CoursewareError):
+        build_courseware("函数的概念", llm)
+    assert len(llm.calls) == 5  # quiz phase tried twice
+
+
+def test_fewer_than_three_quiz_questions_fails():
+    two = {"quiz": _quiz()["quiz"][:2]}
+    steps = [_understanding(), _outline(1), _scene(1), two, two]
+    with pytest.raises(CoursewareError):
+        build_courseware("函数的概念", FakeLLM(steps))
+
+
+def test_quiz_retry_succeeds_when_second_attempt_has_enough():
+    steps = [_understanding(), _outline(1), _scene(1), {"quiz": []}, _quiz()]
+    cw = build_courseware("函数的概念", FakeLLM(steps))
+    assert len(cw["quiz"]) == 3
+
+
+def test_empty_quiz_items_do_not_count():
+    """Three `{}` quiz items are not three usable questions."""
+    empties = {"quiz": [{}, {}, {}]}
+    steps = [_understanding(), _outline(1), _scene(1), empties, empties]
     with pytest.raises(CoursewareError):
         build_courseware("函数的概念", FakeLLM(steps))
 
@@ -256,7 +307,8 @@ def test_prompts_use_validated_json_object_shapes():
     systems = [c[0] for c in llm.calls]
     users = [c[1] for c in llm.calls]
 
-    # The exact system messages proven by scripts/validate_real_generation.py.
+    # System messages used by the shipped orchestration (real run recorded in
+    # docs/superpowers/specs/2026-11-22-真实验证结果.md).
     assert systems[0] == "你是资深初中数学老师。严格只输出 JSON，不要 Markdown 围栏。"
     assert systems[-1] == "你是资深老师，出随堂测验。严格只输出 JSON 对象，不要 Markdown 围栏。"
     # Every step asks for a JSON object and wraps lists, never a bare array.
@@ -287,3 +339,14 @@ def test_domain_module_has_no_fastapi():
     import app.domain.courseware as module
 
     assert "fastapi" not in inspect.getsource(module)
+
+
+def test_real_validation_script_uses_production_build_courseware():
+    """The real-API script must exercise the shipped orchestration, not a copy."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    src = (root / "scripts" / "validate_real_generation.py").read_text(encoding="utf-8")
+    assert "from app.domain.courseware import build_courseware" in src
+    assert "build_courseware(SAMPLE_LECTURE" in src
+    assert ".complete_json(" not in src  # no hand-rolled parallel prompt pipeline

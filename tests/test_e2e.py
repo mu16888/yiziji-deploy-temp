@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -125,8 +126,14 @@ def _assert_deployment_and_docs(root: Path) -> None:
     ):
         assert token in readme, f"README missing required topic: {token}"
 
-    for banned in ("openmaic", "清华", "thu", "lgpl", "mathml2omml", "pptxgenjs"):
+    # Short brand tokens use word boundaries so ordinary words containing the
+    # letters (e.g. "thus") cannot trip the check; the rest stay substrings.
+    for banned in ("清华", "lgpl", "mathml2omml", "pptxgenjs"):
         assert banned not in readme.lower(), f"README still mentions rejected direction: {banned}"
+    for pattern in (r"\bTHU\b", r"\bOpenMAIC\b"):
+        assert not re.search(pattern, readme, re.IGNORECASE), (
+            f"README still mentions rejected direction: {pattern}"
+        )
 
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "nginx" in compose and "app:" in compose

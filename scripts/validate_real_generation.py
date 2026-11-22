@@ -1,10 +1,13 @@
-"""One-off REAL validation of the core hypothesis with DeepSeek.
+"""One-off REAL validation of the SHIPPED generation pipeline with DeepSeek.
 
-Runs: sample lecture -> ingestion -> self-owned orchestration -> REAL DeepSeek
--> Courseware, then prints the actual generated content for human judgement.
+This script deliberately calls the *production* entry point
+``app.domain.courseware.build_courseware`` with a real ``DeepSeekClient``: it does
+NOT hand-roll a parallel prompt pipeline. What runs in production is what gets
+validated here, so the prompt shapes, retry/degradation and assembly are covered
+by the real API call. The resulting Courseware is printed for human judgement.
 
-The API key is read from the environment / .env via app.config.settings;
-it is NEVER printed, logged, or embedded in this file.
+The API key is read from the environment / .env via app.config.settings; it is
+NEVER printed, logged, or embedded in this file.
 """
 from __future__ import annotations
 
@@ -12,10 +15,16 @@ import json
 import sys
 from pathlib import Path
 
+# Windows consoles default to GBK and cannot print the superscript/dash
+# characters that real Chinese math content contains; force UTF-8 output.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 import httpx
 
 from app.adapters.llm.deepseek import DeepSeekClient
 from app.config import settings
+from app.domain.courseware import build_courseware
 
 
 SAMPLE_LECTURE = """一元二次方程的配方法
@@ -55,45 +64,14 @@ def main() -> int:
     # Key is read from settings; only the client sees it. Never print it.
     client = DeepSeekClient(http_client=httpx.Client(timeout=120))
 
-    # --- Minimal self-owned orchestration (N3 is not built yet) -------------
-    # Step 1: outline
-    outline = client.complete_json(
-        "你是资深初中数学老师。严格只输出 JSON，不要 Markdown 围栏。",
-        "根据下面的讲义，提取主题、学科、年级、核心知识点列表，输出 JSON：\n"
-        '{"title": str, "subject": str, "grade": str, "points": [str, ...]}\n\n'
-        f"讲义：\n{SAMPLE_LECTURE}",
-    )
-    print("=== STEP 1: UNDERSTANDING ===")
-    print(json.dumps(outline, ensure_ascii=False, indent=2))
-
-    # Step 2: scenes
-    scenes_obj = client.complete_json(
-        "你是资深老师，设计一节课的场景。严格只输出 JSON 对象，不要 Markdown 围栏。",
-        "根据讲义和知识点，设计 5 个教学场景，按顺序覆盖：引入→概念→步骤→例题→易错点。\n"
-        '输出一个 JSON 对象：{"scenes": [场景1, 场景2, ...]}\n'
-        '每个场景是：{"type": "slide", "title": str, "bullets": [str,...], "narration": str, "visual_hint": str}\n'
-        f"知识点：{outline.get('points')}\n\n讲义：\n{SAMPLE_LECTURE}",
-    )
-    scenes = scenes_obj.get("scenes", [])
-    print("\n=== STEP 2: SCENES ===")
-    print(json.dumps(scenes, ensure_ascii=False, indent=2))
-
-    # Step 3: quiz
-    quiz_obj = client.complete_json(
-        "你是资深老师，出随堂测验。严格只输出 JSON 对象，不要 Markdown 围栏。",
-        "根据讲义出 3 道单选题，每题考察真实知识点。\n"
-        '输出一个 JSON 对象：{"quiz": [题目1, 题目2, ...]}\n'
-        '每道题是：{"question": str, "options": [str,str,str,str], "answer": 0-3, "explain": str}\n'
-        f"讲义：\n{SAMPLE_LECTURE}",
-    )
-    quiz = quiz_obj.get("quiz", [])
-    print("\n=== STEP 3: QUIZ ===")
-    print(json.dumps(quiz, ensure_ascii=False, indent=2))
+    # This is the exact shipped orchestration (no hand-rolled parallel pipeline).
+    courseware = build_courseware(SAMPLE_LECTURE, client)
+    print("=== SHIPPED build_courseware OUTPUT ===")
+    print(json.dumps(courseware, ensure_ascii=False, indent=2))
 
     # Save full output for inspection (no key in it).
-    out = {"understanding": outline, "scenes": scenes, "quiz": quiz}
     path = Path("validation_output.json")
-    path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(courseware, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nSaved full output to {path}")
     return 0
 

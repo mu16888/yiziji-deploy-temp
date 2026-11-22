@@ -13,6 +13,7 @@ be gone and the replaceable DeepSeek backend must be documented.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -76,14 +77,16 @@ class E2EFakeLLM:
                 "visual_hint": "板书标题",
             }
         if system == QUIZ_SYSTEM:
+            base = {
+                "options": ["x+1=0", "x^2+1=0", "1/x=1", "2x=4"],
+                "answer": 1,
+                "explain": "最高次数为 2。",
+            }
             return {
                 "quiz": [
-                    {
-                        "question": "下面哪个是一元二次方程？",
-                        "options": ["x+1=0", "x^2+1=0", "1/x=1", "2x=4"],
-                        "answer": 1,
-                        "explain": "最高次数为 2。",
-                    }
+                    {**base, "question": "下面哪个是一元二次方程？"},
+                    {**base, "question": "配方法先把二次项系数化为几？"},
+                    {**base, "question": "判别式 Δ 决定什么？"},
                 ]
             }
         raise AssertionError(f"unexpected system prompt: {system}")
@@ -240,10 +243,15 @@ def test_shipped_docs_are_own_generation_and_brand_clean():
     for token in required:
         assert token in readme, f"README missing own-generation topic: {token}"
 
-    banned = ("openmaic", "清华", "thu", "lgpl", "mathml2omml", "pptxgenjs")
+    banned = ("清华", "lgpl", "mathml2omml", "pptxgenjs")
     lowered = readme.lower()
     for token in banned:
         assert token not in lowered, f"README still contains rejected reference: {token}"
+    # Word boundaries avoid false positives on normal words containing "thu".
+    for pattern in (r"\bTHU\b", r"\bOpenMAIC\b"):
+        assert not re.search(pattern, readme, re.IGNORECASE), (
+            f"README still contains rejected reference: {pattern}"
+        )
 
     env_example = (root / ".env.example").read_text(encoding="utf-8")
     for token in ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL"):

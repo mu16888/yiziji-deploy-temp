@@ -142,6 +142,27 @@ def test_student_page_renders_narration_and_bullets():
     assert "s.visual_hint" in html
 
 
+def test_degraded_scene_shows_failure_marker():
+    """A degraded placeholder scene shows a visible marker, never a blank page."""
+    cw = _real_courseware()
+    cw["scenes"] = [
+        {
+            "type": "slide",
+            "title": "（生成失败）",
+            "bullets": [],
+            "narration": "",
+            "visual_hint": "",
+            "degraded": True,
+        }
+    ]
+    cw["quiz"] = []
+    with serving(cw, "CDEGRD") as client:
+        r = client.get("/c/CDEGRD")
+    assert r.status_code == 200, r.text[:200]
+    # The marker is both server-rendered and fed to the JS renderer via tojson.
+    assert "（生成失败）" in r.text
+
+
 # --- N5 defect 2: quiz must be answerable ------------------------------------
 
 

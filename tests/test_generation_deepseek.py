@@ -53,14 +53,16 @@ class FakeLLM:
                 "visual_hint": "板书标题",
             }
         if "出随堂测验" in system:
+            base = {
+                "options": ["x+1=0", "x^2+1=0", "1/x=1", "2x=4"],
+                "answer": 1,
+                "explain": "最高次数为 2。",
+            }
             return {
                 "quiz": [
-                    {
-                        "question": "下面哪个是一元二次方程？",
-                        "options": ["x+1=0", "x^2+1=0", "1/x=1", "2x=4"],
-                        "answer": 1,
-                        "explain": "最高次数为 2。",
-                    }
+                    {**base, "question": "下面哪个是一元二次方程？"},
+                    {**base, "question": "配方法先把二次项系数化为几？"},
+                    {**base, "question": "判别式 Δ 决定什么？"},
                 ]
             }
         raise AssertionError(f"unexpected prompt: {combined}")

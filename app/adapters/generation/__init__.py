@@ -46,10 +46,6 @@ def get_adapter(name: str | None = None) -> GenerationAdapter:
         from app.adapters.generation import mock as adapter
 
         return adapter.MockGenerationAdapter()
-    if which == "openmaic_http":
-        from app.adapters.generation import openmaic_http as adapter
-
-        return adapter.OpenMaicHttpAdapter()
     if which == "deepseek":
         from app.adapters.generation.deepseek import DeepSeekGenerationAdapter
 

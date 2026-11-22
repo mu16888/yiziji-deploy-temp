@@ -7,15 +7,11 @@ reserve figure of 20 so the reserve/settle/refund deltas are asserted verbatim.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.adapters.generation import GenerationAdapter
 from app.adapters.generation.mock import MockGenerationAdapter
-from app.adapters.generation.openmaic_http import OpenMaicHttpAdapter
 from app.db import Base
 from app.domain.generation import (
     FAILED,
@@ -241,46 +237,3 @@ def test_create_job_insufficient_credits_rolls_back(db):
         create_job(db, user_id=1, spec={"type": "pbl"}, adapter=FakeAdapter(estimate=20))
     assert db.query(GenerationJob).count() == 0
     assert get_balance(db, 1) == 5
-
-
-def test_openmaic_http_adapter_uses_configured_url():
-    """The HTTP adapter calls OPENMAIC_URL with the same Protocol surface."""
-
-    class _Resp:
-        def __init__(self, data):
-            self._data = data
-
-        def json(self):
-            return self._data
-
-    class _Client:
-        def __init__(self):
-            self.calls = []
-
-        def post(self, url, json=None, **kwargs):
-            self.calls.append(("POST", url, json))
-            if url.endswith("/estimate"):
-                return _Resp({"credits": 25})
-            if url.endswith("/jobs"):
-                return _Resp({"external_id": "om-1"})
-            return _Resp({})
-
-        def get(self, url, **kwargs):
-            self.calls.append(("GET", url, None))
-            if "/status" in url:
-                return _Resp({"status": "succeeded"})
-            if "/result" in url:
-                return _Resp({"share_code": "S-OM", "credits": 25})
-            return _Resp({})
-
-    client = _Client()
-    adapter = OpenMaicHttpAdapter(base_url="https://om.example/api", client=client)
-    assert isinstance(adapter, GenerationAdapter)
-    assert adapter.estimate({"type": "pbl"}) == 25
-    assert (
-        adapter.submit(SimpleNamespace(id=7, reserved_credits=25, spec={}), {}) == "om-1"
-    )
-    assert adapter.status("om-1") == SUCCEEDED
-    assert adapter.result("om-1")["share_code"] == "S-OM"
-    assert all(url.startswith("https://om.example/api") for _, url, _ in client.calls)
-    adapter.cancel("om-1")
