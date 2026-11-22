@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     payment_gateway: str = "mock"
     generation_adapter: str = "mock"
 
+    # WeChat Pay (fake defaults are fine for local/test runs)
+    wechat_app_id: str = "wx-fake-app-id"
+    wechat_mch_id: str = "fake-mch-id"
+    wechat_api_v3_key: str = "fake-api-v3-key"
+    wechat_notify_url: str = ""
+
     # Credits
     credit_expire_days: int = 730
     renew_mode: str = "all_active"

@@ -1,0 +1,348 @@
+"""Order state machine, service operations and pay endpoints (Task 6).
+
+The three tests named in the plan are kept verbatim by name; their bodies use
+the shared in-memory fixture so user id 1 always exists.
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db import Base, get_db
+from app.domain.order import (
+    CLOSED,
+    CREATED,
+    FULFILLED,
+    PAID,
+    PENDING_PAYMENT,
+    REFUNDED,
+    REFUNDING,
+    InvalidOrderTransition,
+    assert_transition,
+    can_transition,
+)
+from app.main import app
+from app.models import CreditEntry, Order, OrderEvent, Product, Promoter, User
+from app.services.auth import issue_token
+from app.services.catalog import ProductNotFound
+from app.services.credits import get_balance
+from app.services.orders import (
+    InvalidChannel,
+    InvalidOrderState,
+    OrderNotFound,
+    begin_refund,
+    cancel_order,
+    confirm_payment,
+    create_order,
+    finish_refund,
+    start_payment,
+)
+from scripts.seed import PRODUCTS
+
+PERSONAL = "pkg_personal_699"
+TEAM = "pkg_team_1999"
+PENDING_RECOVERY = "pending_order_payment_in_progress"
+
+
+# --- fixtures / helpers ------------------------------------------------------
+
+
+@pytest.fixture()
+def db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    session = Session()
+    for data in PRODUCTS:
+        session.add(Product(**data))
+    # The plan's assertions use user_id=1 directly, so seed that user first.
+    session.add(
+        User(phone="13800000001", display_name="U1", role="user", is_active=True)
+    )
+    session.commit()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+@pytest.fixture()
+def client(db):
+    def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.clear()
+
+
+def auth_headers(db):
+    user = db.get(User, 1)
+    return {"Authorization": f"Bearer {issue_token(user, channel='web')}"}
+
+
+def make_user(db, **kwargs):
+    user = User(is_active=True, **kwargs)
+    db.add(user)
+    db.flush()
+    return user
+
+
+# --- the brief's three named tests -------------------------------------------
+
+
+def test_order_state_machine(db):
+    o = create_order(db, user_id=1, sku="pkg_personal_699", channel="native")
+    assert o.status == "pending_payment"
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    assert o.status == "fulfilled" and get_balance(db, 1) == 6000
+
+
+def test_pending_order_recovery(db):
+    o1 = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    o2 = create_order(db, user_id=1, sku=PERSONAL, channel="jsapi")
+    assert o2.id == o1.id
+    assert o2.no == o1.no
+    assert o2.recovery == PENDING_RECOVERY
+
+    # A different SKU, or a different user, must get its own pending order.
+    other_sku = create_order(db, user_id=1, sku=TEAM, channel="native")
+    assert other_sku.id != o1.id
+    other_user = make_user(db, phone="13800000002")
+    other_user_order = create_order(db, user_id=other_user.id, sku=PERSONAL, channel="native")
+    assert other_user_order.id != o1.id
+    assert db.query(Order).count() == 3
+
+
+def test_duplicate_callback_is_idempotent(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+
+    def ledger_count_for_order(no):
+        return db.query(CreditEntry).filter_by(ref_type="order", ref_id=no).count()
+
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    assert ledger_count_for_order(o.no) == 1
+    assert db.query(OrderEvent).filter_by(order_no=o.no, event_id="e1").count() == 1
+    assert get_balance(db, 1) == 6000
+
+
+# --- state machine -----------------------------------------------------------
+
+
+def test_state_machine_transition_table(db):
+    assert can_transition(CREATED, PENDING_PAYMENT)
+    assert can_transition(PENDING_PAYMENT, PAID)
+    assert can_transition(PAID, FULFILLED)
+    assert can_transition(FULFILLED, REFUNDING)
+    assert can_transition(REFUNDING, REFUNDED)
+    assert not can_transition(CLOSED, PAID)
+    assert not can_transition(REFUNDED, FULFILLED)
+    with pytest.raises(InvalidOrderTransition):
+        assert_transition(CLOSED, PAID)
+
+
+# --- order creation / pricing ------------------------------------------------
+
+
+def test_first_order_uses_server_list_price(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    assert o.amount_fen == 69900
+    assert o.idempotency_key == f"order:{o.no}"
+
+
+def test_order_uses_repurchase_price_for_prior_paid_order(db):
+    db.add(
+        Order(
+            no="ORD-HISTORICAL",
+            user_id=1,
+            sku=PERSONAL,
+            amount_fen=69900,
+            paid_amount_fen=69900,
+            status=FULFILLED,
+        )
+    )
+    db.commit()
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    assert o.amount_fen == 55920
+
+
+def test_create_order_unknown_sku_raises(db):
+    with pytest.raises(ProductNotFound):
+        create_order(db, user_id=1, sku="missing", channel="native")
+
+
+def test_create_order_rejects_unknown_channel(db):
+    with pytest.raises(InvalidChannel):
+        create_order(db, user_id=1, sku=PERSONAL, channel="alipay")
+
+
+# --- payment / confirmation --------------------------------------------------
+
+
+def test_start_payment_returns_gateway_payload(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    payload = start_payment(db, o.no)
+    assert payload["order_no"] == o.no
+    assert payload["channel"] == "native"
+    assert "code_url" in payload
+
+
+def test_start_payment_unknown_order_raises(db):
+    with pytest.raises(OrderNotFound):
+        start_payment(db, "ORD-NOPE")
+
+
+def test_confirm_grants_credits_bonuses_and_calls_commission_stub(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+
+    entry = db.query(CreditEntry).filter_by(ref_type="order", ref_id=o.no).one()
+    assert entry.delta == 6000
+    assert entry.entry_type == "purchase"
+    assert entry.idempotency_key == f"purchase:{o.no}"
+    assert db.query(Promoter).filter_by(user_id=1).one().level == "basic"
+    # The affiliate stub is a no-op: Task 8 replaces it in place.
+    from app.models import CommissionEntry
+
+    assert db.query(CommissionEntry).count() == 0
+
+
+def test_confirm_writes_order_event_with_deterministic_key(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=o.no, event_id="evt-42", paid_amount_fen=69900)
+    event = db.query(OrderEvent).filter_by(order_no=o.no, event_id="evt-42").one()
+    assert event.event_type == "payment_confirmed"
+    assert event.payload["paid_amount_fen"] == 69900
+    assert event.idempotency_key.startswith(f"event:{o.no}:")
+    assert o.paid_at is not None and o.fulfilled_at is not None
+    assert o.paid_amount_fen == 69900
+
+
+def test_different_event_id_still_grants_credits_only_once(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    confirm_payment(db, order_no=o.no, event_id="e2", paid_amount_fen=69900)
+    assert get_balance(db, 1) == 6000
+    assert db.query(CreditEntry).filter_by(ref_type="order", ref_id=o.no).count() == 1
+
+
+def test_confirm_rejects_non_integer_amount(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    with pytest.raises(ValueError):
+        confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900.5)
+
+
+def test_retry_creates_exactly_one_fund_row(db):
+    """Deterministic key: a retried purchase writes one ledger row."""
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    for _ in range(3):
+        confirm_payment(db, order_no=o.no, event_id="retry-e", paid_amount_fen=69900)
+    assert db.query(CreditEntry).filter_by(idempotency_key=f"purchase:{o.no}").count() == 1
+
+
+# --- cancel / refund ---------------------------------------------------------
+
+
+def test_cancel_closed_order_is_idempotent(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    first = cancel_order(db, o.no)
+    second = cancel_order(db, o.no)
+    assert first.status == CLOSED and second.id == first.id
+    assert first.closed_at is not None
+    assert db.query(OrderEvent).filter_by(order_no=o.no, event_type="order_cancelled").count() == 1
+
+
+def test_cancel_paid_order_raises(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    with pytest.raises(InvalidOrderState):
+        cancel_order(db, o.no)
+
+
+def test_refund_state_transitions(db):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    refunding = begin_refund(db, o.no)
+    assert refunding.status == REFUNDING
+    refunded = finish_refund(db, o.no)
+    assert refunded.status == REFUNDED
+
+
+# --- API ---------------------------------------------------------------------
+
+
+def test_api_create_and_native_pay(db, client):
+    r = client.post(
+        "/api/pay/orders",
+        json={"sku": PERSONAL, "channel": "native"},
+        headers=auth_headers(db),
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == PENDING_PAYMENT
+    order_no = body["order_no"]
+
+    r2 = client.post(
+        "/api/pay/native_pay",
+        json={"order_no": order_no},
+        headers=auth_headers(db),
+    )
+    assert r2.status_code == 200, r2.text
+    assert "code_url" in r2.json()
+
+
+def test_api_jsapi_pay(db, client):
+    r = client.post(
+        "/api/pay/orders",
+        json={"sku": PERSONAL, "channel": "jsapi"},
+        headers=auth_headers(db),
+    )
+    assert r.status_code == 200, r.text
+    r2 = client.post(
+        "/api/pay/jsapi_pay",
+        json={"order_no": r.json()["order_no"]},
+        headers=auth_headers(db),
+    )
+    assert r2.status_code == 200, r2.text
+    assert "appId" in r2.json() and "package" in r2.json()
+
+
+def test_api_pay_endpoint_rejects_wrong_channel(db, client):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    r = client.post(
+        "/api/pay/jsapi_pay",
+        json={"order_no": o.no},
+        headers=auth_headers(db),
+    )
+    assert r.status_code == 400
+
+
+def test_api_cancel_order(db, client):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    r = client.post(
+        "/api/pay/cancel",
+        json={"order_no": o.no},
+        headers=auth_headers(db),
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == CLOSED
+
+
+def test_api_order_status(db, client):
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    assert client.get(f"/api/pay/orders/{o.no}").status_code == 401
+    r = client.get(f"/api/pay/orders/{o.no}", headers=auth_headers(db))
+    assert r.status_code == 200, r.text
+    assert r.json()["order_no"] == o.no
+    assert r.json()["gateway_status"] in (PENDING_PAYMENT, PAID)

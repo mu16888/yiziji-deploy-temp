@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse
 from app.services.auth import COOKIE_NAME, CSRF_COOKIE_NAME
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
-EXEMPT_PATHS = frozenset({"/health", "/login", "/api/auth/login", "/api/auth/register", "/api/auth/logout"})
+EXEMPT_PATHS = frozenset({"/health", "/login", "/api/auth/login", "/api/auth/register", "/api/auth/logout", "/api/pay/sync"})
 
 
 class CSRFMiddleware:

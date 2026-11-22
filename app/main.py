@@ -7,6 +7,7 @@ from app.api.auth import router as auth_router
 from app.api.catalog import pages_router as catalog_pages_router
 from app.api.catalog import router as catalog_router
 from app.api.credits import router as credits_router
+from app.api.pay import router as pay_router
 from app.middleware.csrf import CSRFMiddleware
 
 app = FastAPI(title="AI Monetization Template")
@@ -15,6 +16,7 @@ app.add_middleware(CSRFMiddleware)
 app.include_router(auth_router)
 app.include_router(auth_pages_router)
 app.include_router(credits_router)
+app.include_router(pay_router)
 app.include_router(catalog_router)
 app.include_router(catalog_pages_router)
 
