@@ -140,11 +140,15 @@ def test_cancel_marks_cancelled():
 
 def test_material_text_takes_priority_over_text():
     """Either spec key is accepted; material_text wins when both are present."""
-    adapter = DeepSeekGenerationAdapter(client=FakeLLM(), store={})
+    llm = FakeLLM()
+    adapter = DeepSeekGenerationAdapter(client=llm, store={})
     eid = adapter.submit(
         make_job(), {"text": "忽略", "material_text": "真正的讲义", "type": "basic"}
     )
     assert adapter.status(eid) == "succeeded"
+    # The chosen text actually reached the orchestration, not just the "text" key.
+    assert llm.calls and any("真正的讲义" in user for _, user in llm.calls)
+    assert all("忽略" not in user for _, user in llm.calls)
 
 
 def test_default_text_when_spec_has_no_text():
@@ -159,6 +163,17 @@ def test_injected_store_is_used():
     adapter = DeepSeekGenerationAdapter(client=FakeLLM(), store=store)
     eid = adapter.submit(make_job(), {"text": "讲义"})
     assert eid in store
+
+
+# --- unknown external id (review fix: never settle an empty artifact) -----------
+
+
+def test_unknown_eid_reports_running_and_has_no_result():
+    """A missing registry entry must not look like a finished job."""
+    adapter = DeepSeekGenerationAdapter(client=FakeLLM(), store={})
+    assert adapter.status("ds-unknown") == "running"
+    assert adapter.status("ds-unknown") != "succeeded"
+    assert adapter.result("ds-unknown") is None
 
 
 # --- registration ---------------------------------------------------------------
@@ -239,3 +254,32 @@ def test_worker_refunds_failed_orchestration(db):
     done = db.get(type(job), job.id)
     assert done.status == FAILED
     assert get_balance(db, 1) == 100  # full refund
+
+
+def test_unknown_eid_never_settles(db):
+    """A worker restart with a fresh store must not settle a running job.
+
+    With the old `status()` default of "succeeded", `poll_once` would call
+    `_fetch_result`, get an empty dict from `result()`, and `complete_job`
+    would charge the customer while marking the job SUCCEEDED with no artifact.
+    """
+    from app.domain.generation import RUNNING, create_job
+    from app.services.credits import get_balance
+    from app.workers.worker import poll_once
+
+    adapter = DeepSeekGenerationAdapter(client=FakeLLM(), store={})
+    job = create_job(db, user_id=1, spec={"type": "basic", "text": "讲义"}, adapter=adapter)
+    assert job.reserved_credits == 10
+    assert get_balance(db, 1) == 90
+
+    # Simulate a job left RUNNING by a previous worker whose eid is absent from
+    # this adapter's store (worker restart / multi-worker sharing one DB).
+    job.status = RUNNING
+    job.external_id = "ds-lost-after-restart"
+    db.commit()
+
+    assert poll_once(db, adapter=adapter) == 0  # no queued/running work advanced
+    done = db.get(type(job), job.id)
+    assert done.status == RUNNING
+    assert done.result is None
+    assert get_balance(db, 1) == 90  # no premature charge
