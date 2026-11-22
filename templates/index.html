@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}AI 互动课堂 · 秒备课工作台{% endblock %}
+{% block content %}
+<section class="hero">
+  <h1>丢进一份教材，10 分钟产出一套明天就能上的互动课</h1>
+  <p class="lead">幻灯片 + 测验 + 互动模拟 + 讲义 + 可编辑导出。备课 → 生成 → 编辑 → 上课 → 复用，越用越贴合你的教学风格。</p>
+  <div class="actions">
+    <a class="btn primary" href="{% if user %}/generate{% else %}/login{% endif %}">免费开始备课</a>
+    <a class="btn" href="#why">看看壁垒</a>
+  </div>
+  {% if products %}
+  <p class="hint">个人方案 {{ products[0].name }} {{ products[0].amount_yuan }} 元起 · <a href="/pricing">查看全部价格</a></p>
+  {% endif %}
+</section>
+
+<section id="why" class="grid cards">
+  <article class="card">
+    <h2>教学成品，不是一段文字</h2>
+    <p>输出课件、测验、互动与讲义，直接可交付，无需二次加工。</p>
+  </article>
+  <article class="card">
+    <h2>越用越贴合</h2>
+    <p>沉淀个人知识库、模板库、题库与专属音色，形成你的教学资产。</p>
+  </article>
+  <article class="card">
+    <h2>工作流闭环</h2>
+    <p>从备课到学生课堂分享，一个工作台串起完整教育流程。</p>
+  </article>
+</section>
+
+<section class="card">
+  <h2>学生免登录上课</h2>
+  <p>生成分享链接发到班级群，学生点开即可上互动课、做随堂测验 —— 效果可见，同事看得见。</p>
+  <p class="hint"><a href="/pricing">个人版与机构版对比</a></p>
+</section>
+{% endblock %}

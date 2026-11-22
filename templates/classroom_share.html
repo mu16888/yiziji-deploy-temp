@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}分享设置 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>分享设置</h1>
+<p class="lead">生成学生链接发到班级群，学生免登录即可上课。</p>
+
+<div class="card">
+  <h2>学生链接</h2>
+  <div class="row">
+    <input id="share-url" type="text" readonly
+           value="{{ job.share_url or ('/c/' ~ job.share_code if job.share_code else '') }}">
+    <button class="btn" type="button" id="copy">复制</button>
+  </div>
+  <p class="hint">链接有效期 <strong>{{ ttl_days }}</strong> 天，到期时间：{{ expires_at }}。过期后链接不可访问。</p>
+
+  <h2>访问密码（可选）</h2>
+  <p class="hint">勾选后学生需输入密码方可进入（本模板在前端演示）。</p>
+  <label class="radio"><input type="checkbox" id="require-password"> 启用密码</label>
+  <input id="password" type="text" placeholder="设置密码" disabled>
+
+  <h2>二维码</h2>
+  <div class="qr" id="qr" aria-label="分享二维码占位图"></div>
+  <p class="hint"><a id="preview" href="#">预览学生课堂</a></p>
+  <p class="msg" id="msg"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const urlInput = document.getElementById('share-url');
+  const url = urlInput.value;
+  document.getElementById('preview').href = url;
+  document.getElementById('copy').addEventListener('click', async function () {
+    try { await navigator.clipboard.writeText(window.location.origin + url); } catch (e) {}
+    const msg = document.getElementById('msg');
+    msg.style.color = '#1a7f37';
+    msg.textContent = '链接已复制。';
+  });
+  const require = document.getElementById('require-password');
+  require.addEventListener('change', function () {
+    document.getElementById('password').disabled = !require.checked;
+  });
+  // A deterministic visual placeholder (not a scanned QR) for the demo.
+  const qr = document.getElementById('qr');
+  let seed = 7;
+  for (let i = 0; i < 144; i++) {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    const cell = document.createElement('i');
+    if ((seed >> 8) % 2 === 0) cell.className = 'on';
+    qr.appendChild(cell);
+  }
+})();
+</script>
+{% endblock %}

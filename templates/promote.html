@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}推广中心 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>推广中心</h1>
+
+<section class="card">
+  <h2>我的邀请码</h2>
+  <div class="row">
+    <strong id="invite-code">{{ invite_code }}</strong>
+    <button class="btn" type="button" id="copy-code">复制</button>
+    <button class="btn" type="button" id="copy-link">复制链接</button>
+  </div>
+  <p>累计邀请：<strong>{{ invited_count }}</strong> 人
+     · 累计佣金：<strong>¥{{ total_commission_yuan }}</strong>
+     · 可提现：<strong>¥{{ withdrawable_yuan }}</strong></p>
+  <p class="hint">等级：{{ promoter_level or '普通用户' }} · {{ user.role }}</p>
+</section>
+
+<div class="two-col">
+  <section class="card">
+    <h2>绑定邀请码</h2>
+    <form id="bind-form">
+      <label>好友的邀请码
+        <input id="bind-code" type="text" placeholder="TCH-8F3K" required>
+      </label>
+      <button class="btn primary" type="submit">绑定</button>
+      <p class="msg" id="bind-msg"></p>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>佣金提现</h2>
+    <p class="hint">最低提现 ¥{{ min_withdraw_yuan }}，仅提交审核，不直接打款。</p>
+    <form id="withdraw-form">
+      <label>提现金额（元）
+        <input id="withdraw-amount" type="number" min="0" step="0.01" required>
+      </label>
+      <button class="btn primary" type="submit">申请提现</button>
+      <p class="msg" id="withdraw-msg"></p>
+    </form>
+  </section>
+</div>
+
+<section class="card">
+  <h2>升级为机构代理</h2>
+  {% if agent_status %}
+  <p>代理状态：{{ agent_status }}</p>
+  {% else %}
+  <p>开席位、代开套餐，享受渠道收益。准入价以服务端商品为准：¥{{ agent_price_yuan }}</p>
+  <p class="hint"><a href="/pricing">查看机构方案</a> 或前往 <a href="/org">机构工作台</a></p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const code = document.getElementById('invite-code').textContent.trim();
+  const inviteLink = window.location.origin + '/login?ref=' + encodeURIComponent(code);
+  document.getElementById('copy-code').addEventListener('click', async function () {
+    try { await navigator.clipboard.writeText(code); } catch (e) {}
+  });
+  document.getElementById('copy-link').addEventListener('click', async function () {
+    try { await navigator.clipboard.writeText(inviteLink); } catch (e) {}
+  });
+
+  document.getElementById('bind-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const res = await window.apiFetch('/api/promote/bind', {
+      method: 'POST', body: JSON.stringify({code: document.getElementById('bind-code').value.trim()})
+    });
+    const msg = document.getElementById('bind-msg');
+    msg.style.color = res.ok ? '#1a7f37' : '#c0392b';
+    msg.textContent = res.ok ? '绑定成功，等待确认。' : ((res.data && res.data.detail) || '绑定失败');
+  });
+
+  document.getElementById('withdraw-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const yuan = parseFloat(document.getElementById('withdraw-amount').value);
+    const fen = Math.round(yuan * 100);
+    const res = await window.apiFetch('/api/promote/withdraw', {
+      method: 'POST', body: JSON.stringify({amount_fen: fen})
+    });
+    const msg = document.getElementById('withdraw-msg');
+    msg.style.color = res.ok ? '#1a7f37' : '#c0392b';
+    msg.textContent = res.ok ? '提现申请已提交，等待审核。' : ((res.data && res.data.detail) || '提现失败');
+  });
+})();
+</script>
+{% endblock %}

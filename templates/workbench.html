@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}工作台 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>工作台</h1>
+<p class="lead">剩余积分 <strong>{{ balance }}</strong> · 在这里开始备课、管理课堂、分享给学生。</p>
+
+<div class="actions">
+  <a class="btn primary" href="/generate">＋ 新建备课</a>
+  <a class="btn" href="/library">我的资产</a>
+  <a class="btn" href="/promote">推广中心</a>
+  <a class="btn" href="/pricing">充值积分</a>
+</div>
+
+<h2>我的课堂</h2>
+{% if jobs %}
+<table class="table">
+  <thead><tr><th>编号</th><th>主题</th><th>状态</th><th>预计/实际积分</th><th>操作</th></tr></thead>
+  <tbody>
+  {% for job in jobs %}
+    <tr>
+      <td>#{{ job.id }}</td>
+      <td>{{ job.spec.get('topic') or '未命名课堂' }}</td>
+      <td><span class="tag">{{ job.status }}</span></td>
+      <td>{{ job.reserved_credits or 0 }} / {{ job.actual_credits or 0 }}</td>
+      <td class="ops">
+        <a href="/jobs/{{ job.id }}">进度</a>
+        <a href="/classroom/{{ job.id }}/edit">编辑</a>
+        {% if job.share_url %}<a href="/classroom/{{ job.id }}/share">分享</a>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="card">还没有课堂。去 <a href="/generate">备课创作</a> 生成第一套互动课件吧。</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AI 互动课堂{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">AI 互动课堂</a>
+    <nav>
+      <a href="/workbench">工作台</a>
+      <a href="/generate">备课</a>
+      <a href="/library">我的资产</a>
+      <a href="/history">历史</a>
+      <a href="/promote">推广</a>
+      <a href="/pricing">价格</a>
+      {% if user and user.role in ['agent', 'admin'] %}<a href="/org">机构</a>{% endif %}
+      {% if user %}<span class="who">{{ user.display_name or user.phone }}</span>
+      {% else %}<a href="/login">登录 / 注册</a>{% endif %}
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

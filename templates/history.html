@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}生成历史 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>生成历史</h1>
+<p class="lead">回看、复用、导出你生成过的每一套课堂。</p>
+
+{% if jobs %}
+<table class="table">
+  <thead><tr><th>编号</th><th>主题</th><th>状态</th><th>实际积分</th><th>生成时间</th><th>操作</th></tr></thead>
+  <tbody>
+  {% for job in jobs %}
+    <tr>
+      <td>#{{ job.id }}</td>
+      <td>{{ job.spec.get('topic') or '未命名课堂' }}</td>
+      <td><span class="tag">{{ job.status }}</span></td>
+      <td>{{ job.actual_credits or 0 }}</td>
+      <td>{{ (job.created_at or '')[:19] }}</td>
+      <td class="ops">
+        <a href="/jobs/{{ job.id }}">回看</a>
+        <a href="/classroom/{{ job.id }}/edit">复用/编辑</a>
+        {% if job.share_url %}<a href="/classroom/{{ job.id }}/share">分享</a>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="card">暂无生成记录。去 <a href="/generate">备课创作</a> 开始吧。</p>
+{% endif %}
+{% endblock %}

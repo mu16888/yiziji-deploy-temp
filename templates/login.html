@@ -3,7 +3,6 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>登录 / 注册 · AI 互动课堂</title>
   <style>
     body { font-family: system-ui, sans-serif; background: #f6f7fb; margin: 0; display: grid; place-items: center; min-height: 100vh; }
@@ -32,8 +31,12 @@
       <p class="msg" id="msg"></p>
     </form>
   </main>
+  <script src="/static/app.js"></script>
   <script>
-    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    // Read CSRF from the cookie, never a stale meta tag: register/login rotate it.
+    // A shared invite link (/login?ref=CODE) pre-fills the invite code.
+    const ref = new URLSearchParams(window.location.search).get('ref');
+    if (ref) document.getElementById('referrer').value = ref;
     document.getElementById('auth-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const body = {
@@ -45,7 +48,7 @@
       try {
         const r = await fetch('/api/auth/register', {
           method: 'POST',
-          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': window.csrfToken()},
           body: JSON.stringify(body),
         });
         const data = await r.json();

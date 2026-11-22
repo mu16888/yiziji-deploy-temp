@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}备课创作 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>秒备课</h1>
+<p class="lead">输入主题或上传资料，选好风格，系统会实时估算积分，确认后再提交。</p>
+
+<div class="two-col">
+  <form id="generate-form" class="card">
+    <h2>① 输入主题 / 上传资料</h2>
+    <label>课堂主题
+      <input id="topic" name="topic" type="text" placeholder="例如：分数运算" required>
+    </label>
+    <label>上传资料（PPT / PDF / 文档）
+      <input id="material" name="material" type="file" multiple>
+    </label>
+
+    <h2>② 课堂风格</h2>
+    <label class="radio"><input type="radio" name="type" value="basic" checked> 基础讲授</label>
+    <label class="radio"><input type="radio" name="type" value="interactive"> 互动讲授</label>
+    <label class="radio"><input type="radio" name="type" value="quiz"> 测验课</label>
+    <label class="radio"><input type="radio" name="type" value="pbl"> PBL 项目式</label>
+
+    <h2>③ 音色</h2>
+    <label class="radio"><input type="radio" name="voice" value="system" checked> 系统音色</label>
+    <label class="radio"><input type="radio" name="voice" value="custom"> 专属音色</label>
+
+    <button class="btn primary" type="submit">生成课堂</button>
+    <p class="msg" id="msg"></p>
+  </form>
+
+  <aside class="card">
+    <h2>实时预估</h2>
+    <p>课堂类型：<span id="plan-type">基础讲授</span></p>
+    <p>预计消耗：<strong id="estimate">{{ estimate }}</strong> 积分</p>
+    <p>当前余额：{{ balance }} 积分</p>
+    <p class="hint">提交前确认，出片后按真实用量多退少补。<br>余额不足可前往 <a href="/pricing">价格页</a> 充值。</p>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const typeLabels = {basic: '基础讲授', interactive: '互动讲授', quiz: '测验课', pbl: 'PBL 项目式'};
+  const typeInputs = Array.from(document.querySelectorAll('input[name="type"]'));
+  const estimateEl = document.getElementById('estimate');
+  const planTypeEl = document.getElementById('plan-type');
+
+  async function refreshEstimate() {
+    const type = (document.querySelector('input[name="type"]:checked') || {}).value || 'basic';
+    planTypeEl.textContent = typeLabels[type] || type;
+    const res = await window.apiFetch('/api/estimate', {
+      method: 'POST',
+      body: JSON.stringify({spec: {type: type, topic: document.getElementById('topic').value.trim()}})
+    });
+    if (res.ok && res.data) estimateEl.textContent = res.data.credits;
+  }
+  typeInputs.forEach(function (el) { el.addEventListener('change', refreshEstimate); });
+  document.getElementById('topic').addEventListener('input', refreshEstimate);
+
+  document.getElementById('generate-form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    const msg = document.getElementById('msg');
+    const type = (document.querySelector('input[name="type"]:checked') || {}).value || 'basic';
+    const spec = {
+      type: type,
+      topic: document.getElementById('topic').value.trim(),
+      voice: (document.querySelector('input[name="voice"]:checked') || {}).value || 'system'
+    };
+    const res = await window.apiFetch('/api/jobs', {
+      method: 'POST', body: JSON.stringify({spec: spec})
+    });
+    if (res.ok && res.data && res.data.id) {
+      window.location.href = '/jobs/' + res.data.id;
+    } else {
+      msg.style.color = '#c0392b';
+      msg.textContent = (res.data && res.data.detail) || '提交失败，请检查余额后重试';
+    }
+  });
+  refreshEstimate();
+})();
+</script>
+{% endblock %}

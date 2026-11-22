@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} · 互动课堂</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="student">
+  <header class="topbar">
+    <span class="brand">互动课堂 · {{ title }}</span>
+    {% if aigc_label %}<span class="tag">本内容由 AI 生成，请理性辨别</span>{% endif %}
+  </header>
+  <main class="container student-main">
+    <div class="card scene-card">
+      <p class="hint">当前场景：<span id="scene-kind">幻灯片 / 互动模拟</span></p>
+      <h2 id="scene-title">
+        {% if scenes %}{{ scenes[0].get('title') if scenes[0] is mapping else scenes[0] }}{% else %}讲师讲解 + 白板绘图{% endif %}
+      </h2>
+      <p class="hint" id="scene-body">
+        {% if scenes and scenes[0] is mapping %}{{ scenes[0].get('body') or '' }}{% endif %}
+      </p>
+      <div class="scene-nav">
+        <button class="btn" type="button" id="prev">上一页</button>
+        <span id="page-count">1 / {{ scenes | length if scenes else 1 }}</span>
+        <button class="btn primary" type="button" id="next">下一页</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>随堂测验</h2>
+      <p class="hint">{{ quiz | length }} 题 · <span id="quiz-progress">0 / {{ quiz | length }} 已答</span></p>
+      <button class="btn" type="button" id="quiz-start">进入测验</button>
+      <div id="quiz-box" hidden></div>
+    </div>
+
+    <p class="hint">分享链接有效期至 {{ expires_at }}。本课堂为免登录学生端。</p>
+  </main>
+  <script src="/static/app.js"></script>
+  <script>
+  (function () {
+    const scenes = {{ scenes | tojson }} || [];
+    const quiz = {{ quiz | tojson }} || [];
+    const titleEl = document.getElementById('scene-title');
+    const bodyEl = document.getElementById('scene-body');
+    const countEl = document.getElementById('page-count');
+    let idx = 0;
+    function render() {
+      const s = scenes[idx] || {};
+      titleEl.textContent = (typeof s === 'string') ? s : (s.title || '场景 ' + (idx + 1));
+      bodyEl.textContent = (typeof s === 'string') ? '' : (s.body || '讲师讲解 + 白板绘图');
+      countEl.textContent = (idx + 1) + ' / ' + Math.max(scenes.length, 1);
+    }
+    document.getElementById('prev').addEventListener('click', function () {
+      if (idx > 0) { idx--; render(); }
+    });
+    document.getElementById('next').addEventListener('click', function () {
+      if (idx < scenes.length - 1) { idx++; render(); }
+    });
+    document.getElementById('quiz-start').addEventListener('click', function () {
+      const box = document.getElementById('quiz-box');
+      box.hidden = false;
+      if (!quiz.length) { box.textContent = '本课堂暂无测验题。'; return; }
+      quiz.forEach(function (q, i) {
+        const p = document.createElement('p');
+        p.textContent = (i + 1) + '. ' + (typeof q === 'string' ? q : (q.question || q.title || '题目'));
+        box.appendChild(p);
+      });
+    });
+    render();
+  })();
+  </script>
+</body>
+</html>

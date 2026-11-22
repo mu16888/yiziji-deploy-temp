@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}我的资产 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>我的资产</h1>
+<p class="lead">沉淀你的知识库、模板、题库与专属音色 —— 用得越久，生成越贴合。</p>
+
+<div class="grid cards">
+  <section class="card">
+    <h2>知识库</h2>
+    <p class="hint">上传的教材、讲稿与资料会作为生成素材沉淀于此。</p>
+    <button class="btn" type="button" data-empty>上传资料</button>
+  </section>
+  <section class="card">
+    <h2>模板库</h2>
+    <p class="hint">按学科与年级复用你常用的课堂风格。</p>
+    <button class="btn" type="button" data-empty>新建模板</button>
+  </section>
+  <section class="card">
+    <h2>题库</h2>
+    <p class="hint">随堂测验题目集中管理，可跨课堂复用。</p>
+    <button class="btn" type="button" data-empty>添加题目</button>
+  </section>
+  <section class="card">
+    <h2>专属音色</h2>
+    <p class="hint">复刻你自己的声音，让课堂讲解更有个人风格。</p>
+    <a class="btn" href="/pricing">了解音色复刻</a>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('[data-empty]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    const msg = document.createElement('p');
+    msg.className = 'hint';
+    msg.textContent = '演示模板：该功能将在后续版本开放。';
+    btn.parentNode.appendChild(msg);
+  });
+});
+</script>
+{% endblock %}

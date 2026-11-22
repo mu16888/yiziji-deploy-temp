@@ -1,0 +1,78 @@
+/* Functional styles for the product Jinja2 pages — no build step. */
+:root { --primary: #4b6bfb; --ink: #1f2430; --muted: #6b7280; --line: #e5e7ee;
+        --bg: #f6f7fb; --ok: #0a7f37; --err: #c0392b; }
+* { box-sizing: border-box; }
+body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
+       background: var(--bg); color: var(--ink); line-height: 1.5; }
+a { color: var(--primary); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+          padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--line); }
+.topbar .brand { font-weight: 700; font-size: 18px; color: var(--ink); }
+.topbar nav { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 14px; }
+.topbar .who { color: var(--muted); }
+.container { max-width: 1040px; margin: 28px auto; padding: 0 20px; }
+h1 { font-size: 26px; margin: 0 0 16px; }
+h2 { font-size: 18px; margin: 0 0 12px; }
+.lead { color: var(--muted); margin: 0 0 20px; }
+.hint { color: var(--muted); font-size: 13px; }
+
+.hero { padding: 28px; border-radius: 14px; color: #fff;
+        background: linear-gradient(135deg, #4b6bfb, #7b4bfb); }
+.hero h1 { font-size: 30px; }
+.hero .lead { color: #eef1ff; }
+.hero a { color: #fff; text-decoration: underline; }
+.hero .hint { color: #e6e9ff; }
+
+.card { background: #fff; border: 1px solid var(--line); border-radius: 12px;
+        padding: 20px; margin-bottom: 18px; box-shadow: 0 4px 16px rgba(0,0,0,.03); }
+.grid { display: grid; gap: 16px; }
+.grid.cards { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin: 18px 0; }
+.grid.cards .card { margin: 0; }
+.two-col { display: grid; grid-template-columns: minmax(280px, 1.6fr) minmax(220px, 1fr); gap: 18px; }
+@media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+
+.btn { display: inline-block; padding: 9px 16px; border: 1px solid var(--line);
+       border-radius: 8px; background: #fff; color: var(--ink); font-size: 14px;
+       cursor: pointer; }
+.btn:hover { border-color: var(--primary); text-decoration: none; }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+label { display: block; font-size: 14px; margin: 12px 0 4px; }
+label.radio { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+input[type="text"], input[type="tel"], input[type="number"], input[type="file"], select, textarea {
+  width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; font: inherit; }
+input[type="radio"], input[type="checkbox"] { width: auto; }
+button.btn { width: auto; }
+.msg { min-height: 18px; font-size: 13px; color: var(--err); margin: 10px 0 0; }
+
+.table { width: 100%; border-collapse: collapse; background: #fff; font-size: 14px; }
+.table th, .table td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; }
+.table th { background: #f3f4f9; }
+.table .ops a { margin-right: 10px; }
+.tag { display: inline-block; font-size: 12px; color: var(--primary);
+       background: #eef1ff; border-radius: 10px; padding: 2px 8px; }
+
+.steps { list-style: none; display: flex; gap: 8px; padding: 0; margin: 0 0 12px; }
+.steps li { flex: 1; text-align: center; padding: 10px; border-radius: 8px;
+            background: #f3f4f9; color: var(--muted); }
+.steps li.done { background: #e7f7ee; color: var(--ok); }
+
+.qr { display: grid; grid-template-columns: repeat(12, 12px); gap: 2px; width: max-content;
+      padding: 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px; }
+.qr i { width: 12px; height: 12px; background: transparent; }
+.qr i.on { background: #1f2430; }
+
+body.student { background: #111827; color: #f3f4f6; }
+.student .topbar { background: #1f2937; border-color: #374151; }
+.student .topbar .brand { color: #f3f4f6; }
+.student .card { background: #1f2937; border-color: #374151; }
+.student .hint { color: #9ca3af; }
+.student .btn { background: #374151; border-color: #4b5563; color: #f3f4f6; }
+.student .btn.primary { background: var(--primary); border-color: var(--primary); }
+.scene-card { text-align: center; min-height: 220px; }
+.scene-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; }

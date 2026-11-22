@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}课堂编辑 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>课堂编辑 <span class="tag">{{ job.status }}</span></h1>
+<p class="lead">主题：{{ job.spec.get('topic') or '未命名课堂' }}</p>
+
+<div class="two-col">
+  <form id="edit-form" class="card">
+    <h2>场景与讲义</h2>
+    <label>课堂标题
+      <input id="title" type="text" value="{{ job.spec.get('topic') or '' }}">
+    </label>
+    <label>讲义备注
+      <textarea id="notes" rows="6" placeholder="编辑讲义、测验说明…">{{ (job.result.get('notes') or '') }}</textarea>
+    </label>
+    <button class="btn primary" type="button" id="save">保存草稿</button>
+    <p class="msg" id="msg"></p>
+  </form>
+
+  <aside class="card">
+    <h2>场景预览</h2>
+    {% if job.result.get('scenes') %}
+      <ol>
+      {% for scene in job.result['scenes'] %}
+        <li>{{ scene.get('title') if scene is mapping else scene }}</li>
+      {% endfor %}
+      </ol>
+    {% else %}
+      <p class="hint">本课堂暂无明确场景列表，可直接进入分享设置。</p>
+    {% endif %}
+    <div class="actions">
+      <a class="btn" href="/classroom/{{ job.id }}/share">分享设置</a>
+      <a class="btn" href="/history">生成历史</a>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('save').addEventListener('click', function () {
+  localStorage.setItem('classroom-{{ job.id }}', JSON.stringify({
+    title: document.getElementById('title').value,
+    notes: document.getElementById('notes').value
+  }));
+  const msg = document.getElementById('msg');
+  msg.style.color = '#1a7f37';
+  msg.textContent = '草稿已保存到本地。';
+});
+</script>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}首次建档 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>首次建档</h1>
+<p class="lead">告诉我们你的学科、年级和用途，系统会为你推荐合适的模板。</p>
+<form id="onboarding-form" class="card">
+  <label>学科
+    <select name="subject">
+      <option value="语文">语文</option>
+      <option value="数学">数学</option>
+      <option value="英语">英语</option>
+      <option value="科学">科学</option>
+      <option value="其他">其他</option>
+    </select>
+  </label>
+  <label>年级
+    <select name="grade">
+      <option value="小学">小学</option>
+      <option value="初中">初中</option>
+      <option value="高中">高中</option>
+    </select>
+  </label>
+  <label>主要用途
+    <select name="purpose">
+      <option value="日常备课">日常备课</option>
+      <option value="公开课">公开课</option>
+      <option value="复习备考">复习备考</option>
+    </select>
+  </label>
+  <button class="btn primary" type="submit">保存并进入工作台</button>
+  <p class="msg" id="msg"></p>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('onboarding-form').addEventListener('submit', function (e) {
+  e.preventDefault();
+  const form = e.currentTarget;
+  const profile = Object.fromEntries(new FormData(form).entries());
+  localStorage.setItem('onboarding', JSON.stringify(profile));
+  window.location.href = '/workbench';
+});
+</script>
+{% endblock %}

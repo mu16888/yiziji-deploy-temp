@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}机构工作台 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>机构工作台</h1>
+<p class="lead">管理席位、共享额度与成员消耗明细。</p>
+
+<section class="grid cards">
+  <div class="card"><h2>机构编号</h2><p>{{ org_id or '未加入机构' }}</p></div>
+  <div class="card"><h2>席位</h2><p><strong>{{ seats }}</strong> 位成员</p></div>
+  <div class="card"><h2>共享积分余额</h2><p><strong>{{ shared_balance }}</strong></p></div>
+</section>
+
+<section class="card">
+  <h2>成员消耗明细</h2>
+  {% if members %}
+  <table class="table">
+    <thead><tr><th>成员</th><th>手机号</th><th>角色</th><th>成员积分余额</th></tr></thead>
+    <tbody>
+    {% for m in members %}
+      <tr><td>{{ m.display_name or '—' }}</td><td>{{ m.phone }}</td><td>{{ m.role }}</td><td>{{ m.balance }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="hint">暂无成员。购买机构方案后可开通席位。</p>
+  {% endif %}
+  <p class="hint"><a href="/pricing">查看机构方案</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}生成进度 · AI 互动课堂{% endblock %}
+{% block content %}
+<h1>生成进度 <span class="tag">{{ job.status }}</span></h1>
+<p class="lead">主题：{{ job.spec.get('topic') or '未命名课堂' }} · 预计 {{ job.reserved_credits or 0 }} 积分</p>
+
+<div class="card">
+  <ol class="steps" id="steps">
+    <li data-step="大纲">大纲</li>
+    <li data-step="场景">场景</li>
+    <li data-step="互动">互动</li>
+    <li data-step="合成">合成</li>
+  </ol>
+  <p class="msg" id="msg">正在排队…</p>
+</div>
+
+<div class="actions" id="done-actions" hidden>
+  <a class="btn primary" id="edit-link" href="#">编辑课堂</a>
+  <a class="btn" id="share-link" href="#">分享设置</a>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const jobId = {{ job.id }};
+  const msg = document.getElementById('msg');
+  const steps = Array.from(document.querySelectorAll('#steps li'));
+  const done = document.getElementById('done-actions');
+
+  function paint(status) {
+    if (status === 'queued' || status === 'running') {
+      msg.textContent = status === 'queued' ? '正在排队…' : '正在生成（大纲 → 场景 → 互动 → 合成）…';
+      steps.forEach(function (li, i) { li.classList.toggle('done', status === 'running' && i < 3); });
+    } else if (status === 'succeeded') {
+      msg.textContent = '生成完成！';
+      steps.forEach(function (li) { li.classList.add('done'); });
+      document.getElementById('edit-link').href = '/classroom/' + jobId + '/edit';
+      document.getElementById('share-link').href = '/classroom/' + jobId + '/share';
+      done.hidden = false;
+    } else {
+      msg.textContent = '任务' + status + '，可返回工作台重试。';
+    }
+  }
+
+  async function poll() {
+    const res = await window.apiFetch('/api/jobs/' + jobId, {method: 'GET'});
+    if (res.ok && res.data) {
+      paint(res.data.status);
+      if (res.data.status === 'succeeded' || res.data.status === 'failed' || res.data.status === 'cancelled') return;
+    }
+    setTimeout(poll, 2000);
+  }
+  paint('{{ job.status }}');
+  if ('{{ job.status }}' !== 'succeeded') poll();
+})();
+</script>
+{% endblock %}
