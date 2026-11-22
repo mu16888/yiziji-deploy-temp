@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>登录 / 注册 · AI 互动课堂</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f6f7fb; margin: 0; display: grid; place-items: center; min-height: 100vh; }
+    .card { background: #fff; padding: 32px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.08); width: 320px; }
+    h1 { font-size: 20px; margin: 0 0 20px; }
+    label { display: block; font-size: 13px; margin: 12px 0 4px; }
+    input { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #d7d9e0; border-radius: 6px; }
+    button { width: 100%; margin-top: 20px; padding: 11px; border: 0; border-radius: 6px; background: #4b6bfb; color: #fff; font-size: 15px; cursor: pointer; }
+    .msg { min-height: 20px; margin-top: 12px; font-size: 13px; color: #c0392b; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>登录 / 注册</h1>
+    <form id="auth-form">
+      <label for="phone">手机号</label>
+      <input id="phone" name="phone" type="tel" value="" placeholder="13800000001" required>
+
+      <label for="code">验证码</label>
+      <input id="code" name="code" type="text" placeholder="开发期固定 123456" required>
+
+      <label for="referrer">邀请码（可选）</label>
+      <input id="referrer" name="referrer" type="text" placeholder="TCH-8F3K">
+
+      <button type="submit">登录 / 注册</button>
+      <p class="msg" id="msg"></p>
+    </form>
+  </main>
+  <script>
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
+    document.getElementById('auth-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const body = {
+        phone: document.getElementById('phone').value.trim(),
+        code: document.getElementById('code').value.trim(),
+        referrer: document.getElementById('referrer').value.trim() || null,
+      };
+      const msg = document.getElementById('msg');
+      try {
+        const r = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrf},
+          body: JSON.stringify(body),
+        });
+        const data = await r.json();
+        msg.style.color = r.ok ? '#1a7f37' : '#c0392b';
+        msg.textContent = r.ok ? '登录成功，欢迎回来！' : (data.detail || '登录失败');
+      } catch (err) {
+        msg.textContent = '网络错误';
+      }
+    });
+  </script>
+</body>
+</html>
