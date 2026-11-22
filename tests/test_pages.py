@@ -214,3 +214,51 @@ def test_no_hardcoded_price_literals_in_templates():
         text = src.read_text(encoding="utf-8")
         for literal in forbidden:
             assert literal not in text, (src.name, literal)
+
+
+def test_org_route_denies_non_owner_and_redacts_pii(db, client, teacher):
+    """Final review Critical #1: /org must not leak other members' PII.
+
+    A logged-in, non-owner ``user`` sharing an org_id gets 403 (no member
+    enumeration). The org owner sees full phone/balance. A staff member
+    (agent/admin) may view the org but other members' phone/balance are
+    redacted unless the caller is the owner.
+    """
+    owner = teacher
+    owner.org_id = f"ORG-U{owner.id}"
+    member = User(
+        phone="13900009999", display_name="成员B", role="user",
+        org_id=owner.org_id, is_active=True, invite_code="ORG-MEMBER-B",
+    )
+    staff = User(
+        phone="13700007777", display_name="代理C", role="agent",
+        org_id=owner.org_id, is_active=True, invite_code="ORG-STAFF-C",
+    )
+    db.add_all([member, staff])
+    db.commit()
+    append_entry(
+        db, user_id=member.id, delta=555, entry_type="grant",
+        ref_type="signup", ref_id=str(member.id),
+        idempotency_key=f"signup-grant:{member.id}",
+    )
+    db.commit()
+
+    # A non-owner normal user in the same org is denied outright.
+    _login(client, member)
+    denied = client.get("/org", follow_redirects=False)
+    assert denied.status_code in (403, 404)
+
+    # The owner sees full PII (phone + per-member balance) for everyone.
+    _login(client, owner)
+    owned = client.get("/org")
+    assert owned.status_code == 200, owned.text[:200]
+    assert member.phone in owned.text
+    assert "555" in owned.text  # member's credit balance
+
+    # Staff can view, but other members' phone/balance are redacted.
+    _login(client, staff)
+    redacted = client.get("/org")
+    assert redacted.status_code == 200, redacted.text[:200]
+    assert member.phone not in redacted.text
+    assert "555" not in redacted.text
+    assert "***" in redacted.text  # explicit redaction placeholder

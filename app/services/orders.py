@@ -9,13 +9,14 @@ replayed callback a no-op.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.payment import PAYMENT_CHANNELS, get_gateway
-from app.domain.ledger import append_entry, refund_unused
+from app.config import settings
+from app.domain.ledger import append_entry, refund_unused, renew_expiry
 from app.domain.order import (
     CLOSED,
     CREATED,
@@ -260,6 +261,10 @@ def confirm_payment(
             order.paid_at = now
             order.fulfilled_at = now
 
+            # Purchase credits expire CREDIT_EXPIRE_DAYS after the recharge;
+            # the same recharge renews other active lots per RENEW_MODE, all
+            # inside this one transaction.
+            new_expiry = now + timedelta(days=settings.credit_expire_days)
             append_entry(
                 db,
                 user_id=order.user_id,
@@ -268,9 +273,11 @@ def confirm_payment(
                 ref_type="order",
                 ref_id=order_no,
                 idempotency_key=f"purchase:{order_no}",
+                expires_at=new_expiry,
             )
             apply_bonuses(db, order.user_id, order.sku)
             apply_order_commission(db, order=order)
+            renew_expiry(db, user_id=order.user_id, new_expiry=new_expiry)
             _record_event(
                 db,
                 order,
@@ -337,8 +344,16 @@ def finish_refund(
     if order.status == REFUNDED:
         return order
     assert_transition(order.status, REFUNDED)
-    if amount_fen is not None and not get_gateway().refund(order_no, amount_fen):
-        raise InvalidOrderState("payment gateway rejected the refund")
+    if amount_fen is not None:
+        # Record and commit an idempotent "initiated" marker BEFORE the external
+        # side effect: a crash after the gateway accepts the money leaves a
+        # durable row the reconciler can find (refund_completed comes later).
+        _record_event(
+            db, order, "refund_initiated", payload={"amount_fen": amount_fen}
+        )
+        db.commit()
+        if not get_gateway().refund(order_no, amount_fen):
+            raise InvalidOrderState("payment gateway rejected the refund")
 
     try:
         with db.begin_nested():

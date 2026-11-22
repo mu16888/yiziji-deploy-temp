@@ -4,6 +4,8 @@ The three tests named in the plan are kept verbatim by name; their bodies use
 the shared in-memory fixture so user id 1 always exists.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.adapters.payment import mock as mock_adapter
+from app.config import settings
 from app.db import Base, get_db
 from app.domain.order import (
     CLOSED,
@@ -427,3 +430,85 @@ def test_paid_amount_mismatch_does_not_fulfill(db, client):
     float_payload["signature"] = mock_adapter.sign(float_payload)
     assert client.post("/api/pay/sync", json=float_payload).status_code == 400
     assert get_balance(db, 1) == 0
+
+
+# --- final review regressions -------------------------------------------------
+
+
+def test_purchase_credits_get_expiry_and_renewal(db, monkeypatch):
+    """Final review Important #2: purchase lots expire and renew on recharge.
+
+    The first order's purchase lot expires ~CREDIT_EXPIRE_DAYS out. A second
+    recharge extends that still-active lot under RENEW_MODE=all_active; under
+    ``new_only`` it is left untouched.
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    first = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=first.no, event_id="e1", paid_amount_fen=69900)
+    lot1 = db.query(CreditEntry).filter_by(idempotency_key=f"purchase:{first.no}").one()
+    assert lot1.expires_at is not None
+    assert settings.credit_expire_days - 1 <= (lot1.expires_at - now).days \
+        <= settings.credit_expire_days
+
+    # Make the first expiry observably older so renewal is visible.
+    lot1.expires_at = lot1.expires_at - timedelta(days=100)
+    db.commit()
+
+    second = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    assert second.no != first.no
+    confirm_payment(
+        db, order_no=second.no, event_id="e2", paid_amount_fen=second.amount_fen
+    )
+    lot2 = db.query(CreditEntry).filter_by(idempotency_key=f"purchase:{second.no}").one()
+    db.refresh(lot1)
+    assert lot1.expires_at == lot2.expires_at  # all_active extended lot 1 too
+
+    # new_only leaves earlier lots untouched.
+    monkeypatch.setattr(settings, "renew_mode", "new_only")
+    lot1.expires_at = lot1.expires_at - timedelta(days=50)
+    lot2.expires_at = lot2.expires_at - timedelta(days=50)
+    older1, older2 = lot1.expires_at, lot2.expires_at
+    db.commit()
+
+    third = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(
+        db, order_no=third.no, event_id="e3", paid_amount_fen=third.amount_fen
+    )
+    lot3 = db.query(CreditEntry).filter_by(idempotency_key=f"purchase:{third.no}").one()
+    db.refresh(lot1)
+    db.refresh(lot2)
+    assert lot1.expires_at == older1 and lot2.expires_at == older2
+    assert lot3.expires_at > older2
+
+
+def test_refund_records_initiated_marker_before_gateway(db, monkeypatch):
+    """Final review Important #4: a durable marker precedes the gateway call."""
+    calls = []
+
+    class SpyGateway:
+        def refund(self, order_no, amount_fen):
+            # By the time the gateway is called the marker must be committed.
+            marker = (
+                db.query(OrderEvent)
+                .filter_by(order_no=order_no, event_type="refund_initiated")
+                .first()
+            )
+            calls.append((order_no, amount_fen, marker is not None))
+            return True
+
+    monkeypatch.setattr("app.services.orders.get_gateway", lambda: SpyGateway())
+    order = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=order.no, event_id="e1", paid_amount_fen=69900)
+    begin_refund(db, order.no)
+
+    finish_refund(db, order.no, amount_fen=69900)
+
+    assert calls == [(order.no, 69900, True)]
+    marker = (
+        db.query(OrderEvent)
+        .filter_by(order_no=order.no, event_type="refund_initiated")
+        .one()
+    )
+    assert marker.payload["amount_fen"] == 69900
+    assert marker.idempotency_key == f"event:{order.no}:refund_initiated:na"

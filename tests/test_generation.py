@@ -161,6 +161,22 @@ def test_mock_adapter_generates_share_code(db):
     assert result["share_url"] == f"/c/{result['share_code']}"
 
 
+def test_mock_estimate_ui_tier_types():
+    """Final review Important #5: the demo UI's ``type`` values hit §12.6 tiers.
+
+    generate.html submits type=interactive/quiz/pbl/basic; the mock estimator
+    must price 25/25/40/10 respectively (it used to fall through to 10).
+    """
+    adapter = MockGenerationAdapter()
+    assert adapter.estimate({"type": "interactive"}) == 25
+    assert adapter.estimate({"type": "quiz"}) == 25
+    assert adapter.estimate({"type": "interactive_classroom_with_quiz"}) == 25
+    assert adapter.estimate({"type": "pbl"}) == 40
+    assert adapter.estimate({"type": "basic"}) == 10
+    # Legacy flag-keyed specs keep working.
+    assert adapter.estimate({"type": "basic", "has_quiz": True}) == 25
+
+
 # --- worker / end-to-end ------------------------------------------------------
 
 

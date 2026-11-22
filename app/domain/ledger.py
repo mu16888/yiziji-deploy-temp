@@ -323,20 +323,34 @@ def refund_unused(
 def _lot_remaining(
     db: Session, user_id: int, pool: str, lots: list[CreditEntry]
 ) -> dict[int, int]:
-    """Remaining credits per lot, consuming debits oldest-lot-first (FIFO)."""
+    """Remaining credits per lot, consuming debits oldest-lot-first (FIFO).
+
+    Positive ``settle``/``refund`` deltas return credits that a reservation had
+    previously consumed (多退少补). FIFO debits always draw from the oldest lot
+    first, so a returned credit is restored to that oldest lot; ignoring these
+    returns understates an order's truly-unused credits after a partial settle.
+    """
     remaining = {lot.id: int(lot.delta) for lot in lots}
-    debits = (
-        db.query(CreditEntry)
-        .filter(
-            CreditEntry.user_id == user_id,
-            CreditEntry.pool == pool,
-            CreditEntry.delta < 0,
+    lot_ids = [lot.id for lot in lots]
+    movements: list[CreditEntry] = []
+    if lot_ids:
+        movements = (
+            db.query(CreditEntry)
+            .filter(
+                CreditEntry.user_id == user_id,
+                CreditEntry.pool == pool,
+                CreditEntry.id.notin_(lot_ids),
+            )
+            .order_by(CreditEntry.id)
+            .all()
         )
-        .order_by(CreditEntry.id)
-        .all()
-    )
-    for debit in debits:
-        owed = -int(debit.delta)
+    for entry in movements:
+        delta = int(entry.delta)
+        if delta > 0:
+            # A settle/refund return: restore to the FIFO-origin (oldest) lot.
+            remaining[lot_ids[0]] += delta
+            continue
+        owed = -delta
         for lot in lots:
             if owed <= 0:
                 break

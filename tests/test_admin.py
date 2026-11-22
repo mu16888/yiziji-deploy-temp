@@ -364,3 +364,41 @@ def test_admin_pages_are_protected_and_render(db, client, admin_headers):
         r = client.get(path, headers=admin_headers)
         assert r.status_code == 200, (path, r.text[:200])
         assert "管理后台" in r.text
+
+
+def test_admin_refund_cannot_exceed_paid(db, client, normal, admin_headers, monkeypatch):
+    """Final review Important #4: clamp refund amount at the API boundary."""
+    calls = []
+
+    class SpyGateway:
+        def refund(self, order_no, amount_fen):
+            calls.append((order_no, amount_fen))
+            return True
+
+    monkeypatch.setattr("app.api.admin.get_gateway", lambda: SpyGateway())
+    monkeypatch.setattr("app.services.orders.get_gateway", lambda: SpyGateway())
+
+    order = create_order(db, user_id=normal.id, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=order.no, event_id="e1", paid_amount_fen=69900)
+
+    r = client.post(
+        f"/admin/orders/{order.no}/refund",
+        json={"amount_fen": 69901, "reason": "over refund"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 400, r.text
+    assert calls == []  # gateway never called
+    db.refresh(order)
+    assert order.status == "fulfilled"  # no begin_refund / status change
+    assert db.query(AuditLog).filter_by(action="admin:refund_approve").count() == 0
+
+    # A negative amount is rejected for the same reason.
+    r = client.post(
+        f"/admin/orders/{order.no}/refund",
+        json={"amount_fen": -1, "reason": "negative"},
+        headers=admin_headers,
+    )
+    assert r.status_code == 400
+    assert calls == []
+    db.refresh(order)
+    assert order.status == "fulfilled"

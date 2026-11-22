@@ -163,7 +163,7 @@ def test_e2e_full_loop(db, client):
     assert teacher.display_name and teacher.invite_code
 
     # 3. 备课生成：估算 → 预扣 → worker 结算（多退少补）
-    spec1 = {"type": "interactive_classroom", "scenes": 12, "topic": "第3章 分数运算"}
+    spec1 = {"type": "basic", "scenes": 12, "topic": "第3章 分数运算"}
     est = client.post("/api/estimate", json={"spec": spec1}, headers=teacher_headers)
     assert est.status_code == 200, est.text
     assert est.json()["credits"] == 10

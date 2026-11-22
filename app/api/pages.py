@@ -251,21 +251,36 @@ def org(
 ):
     if user is None:
         return RedirectResponse("/login", status_code=302)
+
+    # The nav link is staff-only, but the route itself must not trust that: a
+    # logged-in non-owner sharing an org_id could otherwise enumerate every
+    # member's phone number and credit balance.
+    is_owner = bool(user.org_id) and user.org_id == f"ORG-U{user.id}"
+    is_staff = user.role in ("agent", "admin")
+    # A user who has not joined an org has no members to enumerate (the query
+    # below is empty), so their own empty view stays renderable.
+    if user.org_id and not (is_owner or is_staff):
+        raise HTTPException(status_code=403, detail="not allowed to view this org")
+
     members = (
         db.query(User).filter_by(org_id=user.org_id).order_by(User.id).all()
         if user.org_id
         else []
     )
-    member_views = [
-        {
-            "id": m.id,
-            "display_name": m.display_name,
-            "phone": m.phone,
-            "role": m.role,
-            "balance": get_balance(db, m.id),
-        }
-        for m in members
-    ]
+    member_views = []
+    for m in members:
+        # Only the org owner may see everyone's phone/balance; staff may view
+        # the org but other members' PII is redacted (a member sees their own).
+        show_full = is_owner or m.id == user.id
+        member_views.append(
+            {
+                "id": m.id,
+                "display_name": m.display_name,
+                "phone": m.phone if show_full else "***",
+                "role": m.role,
+                "balance": get_balance(db, m.id) if show_full else "—",
+            }
+        )
     return _render(
         request,
         "org.html",

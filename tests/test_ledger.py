@@ -297,3 +297,36 @@ def test_renew_new_only_mode_renews_latest_lot(db, monkeypatch):
     db.refresh(second)
     assert second.expires_at == new_expiry
     assert first.expires_at != new_expiry
+
+
+def test_refund_after_partial_settle_returns_full_unused(db):
+    """Final review Important #3: a positive settle delta must be added back.
+
+    grant 100 -> reserve 20 (balance 80) -> settle actual 15 (+5, balance 85).
+    The order's truly-unused credits are 100 - 15 = 85, so the refund must be
+    10000 fen * 85 / 100 = 8500. The old FIFO math counted only the -20 reserve
+    and ignored the +5 settle return, under-refunding by 5 credits' worth.
+    (The refund marker is zero-delta by T4 design, so the balance stays 85.)
+    """
+    _order(db, "ORD-PS", 1, paid_fen=10000)
+    append_entry(
+        db, user_id=1, delta=100, entry_type="purchase", ref_type="order",
+        ref_id="ORD-PS", idempotency_key="purchase:ORD-PS",
+    )
+    db.commit()
+
+    reserve(
+        db, user_id=1, amount=20, ref_type="job", ref_id="job-ps",
+        idempotency_key="reserve:job-ps",
+    )
+    settle(
+        db, user_id=1, reserved_ref_id="job-ps", actual_amount=15,
+        idempotency_key="settle:job-ps",
+    )
+    db.commit()
+    assert get_balance(db, 1) == 85
+
+    fen = refund_unused(db, order_no="ORD-PS", idempotency_key="refund:ORD-PS")
+    db.commit()
+    assert fen == 8500
+    assert get_balance(db, 1) == 85  # zero-delta marker never drains the account

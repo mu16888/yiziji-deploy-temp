@@ -18,6 +18,10 @@ _CANCELLED = "cancelled"
 _EXPORT_KINDS = frozenset({"pptx", "offline_html", "html", "export"})
 _EXPORT_FORMATS = frozenset({"pptx", "html", "offline_html"})
 _PBL_KINDS = frozenset({"pbl", "project", "project_based", "project_based_learning"})
+# Types the demo UI (templates/generate.html) submits for its priced tiers.
+_INTERACTIVE_TYPES = frozenset(
+    {"interactive", "quiz", "interactive_classroom_with_quiz"}
+)
 _INTERACTIVE_FLAGS = (
     "interactive_sim",
     "interactive",
@@ -53,7 +57,9 @@ class MockGenerationAdapter:
             return 5
         if kind in _PBL_KINDS:
             return 40
-        if any(bool(spec.get(flag)) for flag in _INTERACTIVE_FLAGS):
+        if kind in _INTERACTIVE_TYPES or any(
+            bool(spec.get(flag)) for flag in _INTERACTIVE_FLAGS
+        ):
             return 25
         return 10
 

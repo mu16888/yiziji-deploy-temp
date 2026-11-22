@@ -295,13 +295,26 @@ def approve_refund(
     if before["status"] == "refunded":
         return before  # idempotent replay: no second audit row
 
+    # Clamp at the boundary: a real gateway happily over-refunds, so never let
+    # a client request more than was actually paid (or a negative amount).
+    paid = int(order.paid_amount_fen) if order.paid_amount_fen is not None else None
+    requested = body.amount_fen if body else None
+    if requested is not None:
+        if requested < 0 or (paid is not None and requested > paid):
+            raise HTTPException(
+                status_code=400,
+                detail=f"refund amount {requested} exceeds paid amount {paid}",
+            )
+        amount = requested
+    else:
+        amount = paid
+
     if before["status"] not in ("refunding", "refunded"):
         try:
             begin_refund(db, order.no)
         except OrderError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    amount = (body.amount_fen if body else None) or order.paid_amount_fen
     try:
         finish_refund(db, order.no, amount_fen=amount)
     except OrderError as exc:
