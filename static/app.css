@@ -76,3 +76,13 @@ body.student { background: #111827; color: #f3f4f6; }
 .student .btn.primary { background: var(--primary); border-color: var(--primary); }
 .scene-card { text-align: center; min-height: 220px; }
 .scene-nav { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 24px; }
+.student .scene-narration { font-size: 16px; margin: 12px 0; white-space: pre-wrap; }
+.student .scene-bullets { display: inline-block; text-align: left; margin: 8px 0; padding-left: 22px; }
+.student .scene-bullets li { margin: 4px 0; }
+.student .quiz-item { border-top: 1px solid var(--line); padding: 14px 0; }
+.student .quiz-question { font-weight: 600; }
+.student .quiz-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.student .quiz-option.correct { border-color: var(--ok); color: #8ef0b6; }
+.student .quiz-option.wrong { border-color: var(--err); color: #ffb3a7; }
+.student .quiz-explain { color: #fbbf24; }
+.quiz-result-mark { font-weight: 700; }

@@ -17,9 +17,14 @@
       <h2 id="scene-title">
         {% if scenes %}{{ scenes[0].get('title') if scenes[0] is mapping else scenes[0] }}{% else %}讲师讲解 + 白板绘图{% endif %}
       </h2>
-      <p class="hint" id="scene-body">
-        {% if scenes and scenes[0] is mapping %}{{ scenes[0].get('body') or '' }}{% endif %}
-      </p>
+      <!-- narration is the main text of a real Courseware scene; `body` is the legacy mock field. -->
+      <p class="scene-narration" id="scene-narration">{% if scenes and scenes[0] is mapping %}{{ scenes[0].get('narration') or scenes[0].get('body') or '' }}{% endif %}</p>
+      <ul class="scene-bullets" id="scene-bullets">
+        {% if scenes and scenes[0] is mapping %}
+          {% for b in (scenes[0].get('bullets') or []) %}<li>{{ b }}</li>{% endfor %}
+        {% endif %}
+      </ul>
+      <p class="hint scene-visual-hint" id="scene-visual-hint"{% if not (scenes and scenes[0] is mapping and scenes[0].get('visual_hint')) %} hidden{% endif %}>{% if scenes and scenes[0] is mapping %}{{ scenes[0].get('visual_hint') or '' }}{% endif %}</p>
       <div class="scene-nav">
         <button class="btn" type="button" id="prev">上一页</button>
         <span id="page-count">1 / {{ scenes | length if scenes else 1 }}</span>
@@ -31,7 +36,24 @@
       <h2>随堂测验</h2>
       <p class="hint">{{ quiz | length }} 题 · <span id="quiz-progress">0 / {{ quiz | length }} 已答</span></p>
       <button class="btn" type="button" id="quiz-start">进入测验</button>
-      <div id="quiz-box" hidden></div>
+      <div id="quiz-box" hidden>
+        {% if not quiz %}<p class="hint">本课堂暂无测验题。</p>{% endif %}
+        {% for q in quiz %}
+          <div class="quiz-item" data-qindex="{{ loop.index0 }}">
+            {% if q is mapping %}
+              <p class="quiz-question">{{ loop.index }}. {{ q.get('question') or q.get('title') or '题目' }}</p>
+              <div class="quiz-options">
+                {% for opt in (q.get('options') or []) %}
+                  <button class="btn quiz-option" type="button" data-index="{{ loop.index0 }}">{{ 'ABCD'[loop.index0] if loop.index0 < 4 else loop.index }}. {{ opt }}</button>
+                {% endfor %}
+              </div>
+              <p class="quiz-explain hint" hidden>{{ q.get('explain') or '' }}</p>
+            {% else %}
+              <p class="quiz-question">{{ loop.index }}. {{ q }}</p>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
     </div>
 
     <p class="hint">分享链接有效期至 {{ expires_at }}。本课堂为免登录学生端。</p>
@@ -42,29 +64,90 @@
     const scenes = {{ scenes | tojson }} || [];
     const quiz = {{ quiz | tojson }} || [];
     const titleEl = document.getElementById('scene-title');
-    const bodyEl = document.getElementById('scene-body');
+    const narrationEl = document.getElementById('scene-narration');
+    const bulletsEl = document.getElementById('scene-bullets');
+    const visualHintEl = document.getElementById('scene-visual-hint');
     const countEl = document.getElementById('page-count');
+    const quizProgressEl = document.getElementById('quiz-progress');
     let idx = 0;
+    let answeredCount = 0;
+
     function render() {
       const s = scenes[idx] || {};
-      titleEl.textContent = (typeof s === 'string') ? s : (s.title || '场景 ' + (idx + 1));
-      bodyEl.textContent = (typeof s === 'string') ? '' : (s.body || '讲师讲解 + 白板绘图');
+      const isStr = typeof s === 'string';
+      titleEl.textContent = isStr ? s : (s.title || '场景 ' + (idx + 1));
+      // Defect 1 fix: narration is the main text; fall back to legacy body, then placeholder.
+      narrationEl.textContent = isStr ? '' : (s.narration || s.body || '讲师讲解 + 白板绘图');
+      // Bullets rendered as a list beneath the narration.
+      bulletsEl.innerHTML = '';
+      if (!isStr && Array.isArray(s.bullets)) {
+        s.bullets.forEach(function (b) {
+          const li = document.createElement('li');
+          li.textContent = b;
+          bulletsEl.appendChild(li);
+        });
+      }
+      // visual_hint is optional.
+      if (!isStr && s.visual_hint) {
+        visualHintEl.textContent = s.visual_hint;
+        visualHintEl.hidden = false;
+      } else {
+        visualHintEl.textContent = '';
+        visualHintEl.hidden = true;
+      }
       countEl.textContent = (idx + 1) + ' / ' + Math.max(scenes.length, 1);
     }
+
+    function updateQuizProgress() {
+      quizProgressEl.textContent = answeredCount + ' / ' + quiz.length + ' 已答';
+    }
+
     document.getElementById('prev').addEventListener('click', function () {
       if (idx > 0) { idx--; render(); }
     });
     document.getElementById('next').addEventListener('click', function () {
       if (idx < scenes.length - 1) { idx++; render(); }
     });
+
     document.getElementById('quiz-start').addEventListener('click', function () {
       const box = document.getElementById('quiz-box');
       box.hidden = false;
-      if (!quiz.length) { box.textContent = '本课堂暂无测验题。'; return; }
-      quiz.forEach(function (q, i) {
-        const p = document.createElement('p');
-        p.textContent = (i + 1) + '. ' + (typeof q === 'string' ? q : (q.question || q.title || '题目'));
-        box.appendChild(p);
+      answeredCount = 0;
+      updateQuizProgress();
+      // Options are server-rendered; wire up click -> compare with q.answer ->
+      // show ✓/✗ + q.explain, and advance the dynamic quiz-progress counter.
+      Array.prototype.forEach.call(box.querySelectorAll('.quiz-item'), function (item) {
+        const i = parseInt(item.getAttribute('data-qindex'), 10);
+        const q = quiz[i];
+        if (!q || typeof q === 'string') return; // legacy string quiz: question text only
+        const opts = item.querySelectorAll('.quiz-option');
+        const explainEl = item.querySelector('.quiz-explain');
+        let resolved = false;
+        Array.prototype.forEach.call(opts, function (btn) {
+          btn.addEventListener('click', function () {
+            if (resolved) return;
+            resolved = true;
+            const oi = parseInt(btn.getAttribute('data-index'), 10);
+            const correct = oi === q.answer;
+            btn.classList.add(correct ? 'correct' : 'wrong');
+            const mark = document.createElement('span');
+            mark.className = 'quiz-result-mark';
+            mark.textContent = correct ? ' ✓' : ' ✗';
+            btn.appendChild(mark);
+            if (!correct && typeof q.answer === 'number' && opts[q.answer]) {
+              opts[q.answer].classList.add('correct');
+            }
+            if (explainEl && q.explain) {
+              const prefix = correct
+                ? '回答正确！'
+                : ('正确答案：' + (typeof q.answer === 'number' ? (q.answer + 1) : q.answer) + '。');
+              explainEl.textContent = prefix + ' ' + q.explain;
+              explainEl.hidden = false;
+            }
+            answeredCount += 1;
+            updateQuizProgress();
+          });
+        });
       });
     });
     render();
