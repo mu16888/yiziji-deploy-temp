@@ -23,6 +23,7 @@ _NO_CASH_COMMISSION_SKUS = frozenset({"pkg_newcomer_experience_199"})
 _ATTRIBUTION_LOCKING_TYPES = frozenset({"package"})
 
 _GRANT_ACTION = "bonus:grant"
+_REVOKE_ACTION = "bonus:revoke"
 
 # Entitlement upgrades are monotonic: buying a lower tier must not downgrade a
 # promoter who already earned a higher level.
@@ -225,3 +226,50 @@ def apply_bonuses(db: Session, user_id: int, sku: str) -> None:
 
     _record_grant(db, user_id, sku, bonuses)
     db.flush()
+
+
+def revoke_bonuses(db: Session, *, user_id: int, sku: str, order_no: str) -> AuditLog | None:
+    """Write a compensating grant record when an order is refunded.
+
+    T5 has no dedicated entitlements table (grants live in ``AuditLog``), so the
+    authoritative revoke marker is a structured ``bonus:revoke`` row keyed by
+    ``(user, sku, order_no)``. Flush-only and idempotent; the caller owns the
+    transaction. A missing original grant still gets a revoke marker so the
+    refund is fully auditable.
+    """
+    for row in (
+        db.query(AuditLog)
+        .filter_by(action=_REVOKE_ACTION, target_type="user", target_id=str(user_id))
+        .all()
+    ):
+        after = row.after or {}
+        if after.get("sku") == sku and after.get("order_no") == order_no:
+            return row
+
+    grants: dict = {}
+    for row in (
+        db.query(AuditLog)
+        .filter_by(action=_GRANT_ACTION, target_type="user", target_id=str(user_id))
+        .all()
+    ):
+        after = row.after or {}
+        if after.get("sku") == sku:
+            grants = {k: v for k, v in after.items() if k != "sku"}
+            break
+
+    revoke = AuditLog(
+        actor_id=None,
+        action=_REVOKE_ACTION,
+        target_type="user",
+        target_id=str(user_id),
+        after={
+            "sku": sku,
+            "order_no": order_no,
+            "revoked": True,
+            "grants": grants,
+        },
+        reason=f"entitlements revoked for {sku} on order {order_no}",
+    )
+    db.add(revoke)
+    db.flush()
+    return revoke

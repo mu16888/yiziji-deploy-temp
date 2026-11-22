@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.adapters.payment import PAYMENT_CHANNELS, get_gateway
-from app.domain.ledger import append_entry
+from app.domain.ledger import append_entry, refund_unused
 from app.domain.order import (
     CLOSED,
     CREATED,
@@ -27,8 +27,8 @@ from app.domain.order import (
     assert_transition,
 )
 from app.models import CreditEntry, Order, OrderEvent, Product, User
-from app.services.affiliate import apply_order_commission
-from app.services.catalog import apply_bonuses, get_price
+from app.services.affiliate import apply_order_commission, reverse_order_commission
+from app.services.catalog import apply_bonuses, get_price, revoke_bonuses
 
 # Marker set on an order returned from pending-order recovery so the API can
 # tell the client "continue paying this one" instead of creating a duplicate.
@@ -53,6 +53,14 @@ class InvalidOrderState(OrderError):
 
 class NotPurchasable(OrderError):
     """Raised when the SKU's catalogue row is not purchasable."""
+
+
+class PaymentAmountMismatch(OrderError):
+    """Raised when a paid amount differs from the server-authoritative price.
+
+    The order is left in ``pending_payment`` so a human can review it; no
+    credits, bonuses or commission are granted.
+    """
 
 
 def _utcnow() -> datetime:
@@ -208,6 +216,13 @@ def confirm_payment(
         return _get_order(db, order_no)
 
     order = _get_order(db, order_no)
+    # The price is server-authoritative: a signed callback for another amount
+    # is never fulfilled. Leave the order pending for manual review.
+    if paid_amount_fen != int(order.amount_fen):
+        raise PaymentAmountMismatch(
+            f"paid amount {paid_amount_fen} != order price {order.amount_fen}"
+        )
+
     already_purchased = (
         db.query(CreditEntry)
         .filter_by(idempotency_key=f"purchase:{order_no}")
@@ -311,16 +326,48 @@ def begin_refund(db: Session, order_no: str) -> Order:
 def finish_refund(
     db: Session, order_no: str, *, amount_fen: int | None = None
 ) -> Order:
-    """Complete a refund; optionally ask the gateway to refund ``amount_fen``."""
+    """Complete a refund in one transaction: reverse, revoke, log and settle.
+
+    Reverses commission (T8 hook), writes the compensating entitlement marker,
+    records the T4 refund ledger entry with deterministic key
+    ``refund:{order_no}``, and writes ``refund_completed``. A zero unused-credit
+    result is not an error -- the refund event is still recorded.
+    """
     order = _get_order(db, order_no)
     if order.status == REFUNDED:
         return order
     assert_transition(order.status, REFUNDED)
     if amount_fen is not None and not get_gateway().refund(order_no, amount_fen):
         raise InvalidOrderState("payment gateway rejected the refund")
-    order.status = REFUNDED
-    _record_event(
-        db, order, "refund_completed", payload={"amount_fen": amount_fen}
-    )
-    db.commit()
+
+    try:
+        with db.begin_nested():
+            order.status = REFUNDED
+            order.refund_status = "refunded"
+            reverse_order_commission(db, order=order)
+            revoke_bonuses(
+                db, user_id=order.user_id, sku=order.sku, order_no=order_no
+            )
+            # T4 derives the refund user from this order's purchase lots; a
+            # paid-but-never-fulfilled order has none, so there is no credit
+            # side to refund in that case.
+            has_purchase = (
+                db.query(CreditEntry.id)
+                .filter_by(ref_type="order", ref_id=order_no, entry_type="purchase")
+                .first()
+                is not None
+            )
+            if has_purchase:
+                refund_unused(
+                    db, order_no=order_no, idempotency_key=f"refund:{order_no}"
+                )
+            _record_event(
+                db, order, "refund_completed", payload={"amount_fen": amount_fen}
+            )
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if db.query(Order).filter_by(no=order_no).first().status == REFUNDED:
+            return _get_order(db, order_no)
+        raise
     return _get_order(db, order_no)

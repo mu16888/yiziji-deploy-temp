@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.adapters.payment import mock as mock_adapter
 from app.db import Base, get_db
 from app.domain.order import (
     CLOSED,
@@ -24,7 +25,7 @@ from app.domain.order import (
     can_transition,
 )
 from app.main import app
-from app.models import CreditEntry, Order, OrderEvent, Product, Promoter, User
+from app.models import AuditLog, CreditEntry, Order, OrderEvent, Product, Promoter, User
 from app.services.auth import issue_token
 from app.services.catalog import ProductNotFound
 from app.services.credits import get_balance
@@ -32,6 +33,7 @@ from app.services.orders import (
     InvalidChannel,
     InvalidOrderState,
     OrderNotFound,
+    PaymentAmountMismatch,
     begin_refund,
     cancel_order,
     confirm_payment,
@@ -346,3 +348,82 @@ def test_api_order_status(db, client):
     assert r.status_code == 200, r.text
     assert r.json()["order_no"] == o.no
     assert r.json()["gateway_status"] in (PENDING_PAYMENT, PAID)
+
+
+# --- review-fix regressions --------------------------------------------------
+
+
+def test_refund_reverses_commission_and_writes_refund_entry(db, monkeypatch):
+    """Review Important #1: refund reverses commission, revokes entitlements,
+    writes a refund ledger row, and stays idempotent."""
+    commission_calls = []
+
+    def commission_spy(db_, *, order):
+        commission_calls.append(order.no)
+        return []
+
+    monkeypatch.setattr(
+        "app.services.orders.reverse_order_commission", commission_spy
+    )
+
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+    confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900)
+    begin_refund(db, o.no)
+    refunded = finish_refund(db, o.no)
+
+    assert refunded.status == REFUNDED
+    assert commission_calls == [o.no]
+
+    refund_entry = (
+        db.query(CreditEntry).filter_by(idempotency_key=f"refund:{o.no}").one()
+    )
+    assert refund_entry.entry_type == "refund"
+    assert refund_entry.reason == "refund_fen:69900"
+
+    revoke = db.query(AuditLog).filter_by(action="bonus:revoke", target_id="1").one()
+    assert revoke.after["sku"] == PERSONAL
+    assert revoke.after["order_no"] == o.no
+    assert revoke.after["revoked"] is True
+
+    # A repeated finish must not reverse twice or duplicate any marker row.
+    finish_refund(db, o.no)
+    assert commission_calls == [o.no]
+    assert db.query(AuditLog).filter_by(action="bonus:revoke").count() == 1
+    assert (
+        db.query(CreditEntry).filter_by(idempotency_key=f"refund:{o.no}").count() == 1
+    )
+
+
+def test_paid_amount_mismatch_does_not_fulfill(db, client):
+    """Review Important #2: paid amount must strictly equal the server price."""
+    o = create_order(db, user_id=1, sku=PERSONAL, channel="native")
+
+    with pytest.raises(PaymentAmountMismatch):
+        confirm_payment(db, order_no=o.no, event_id="e1", paid_amount_fen=69900 - 1)
+    assert db.query(Order).filter_by(no=o.no).one().status == PENDING_PAYMENT
+    assert get_balance(db, 1) == 0
+    assert (
+        db.query(OrderEvent)
+        .filter_by(order_no=o.no, event_type="payment_confirmed")
+        .count()
+        == 0
+    )
+
+    payload = {
+        "order_no": o.no,
+        "event_id": "e2",
+        "paid_amount_fen": 69900 - 1,
+        "timestamp": "1",
+        "nonce": "n",
+    }
+    payload["signature"] = mock_adapter.sign(payload)
+    r = client.post("/api/pay/sync", json=payload)
+    assert r.status_code == 400, r.text
+    assert db.query(Order).filter_by(no=o.no).one().status == PENDING_PAYMENT
+    assert get_balance(db, 1) == 0
+
+    # Floats are rejected at the boundary rather than coerced into fen.
+    float_payload = {**payload, "event_id": "e3", "paid_amount_fen": 69900.0}
+    float_payload["signature"] = mock_adapter.sign(float_payload)
+    assert client.post("/api/pay/sync", json=float_payload).status_code == 400
+    assert get_balance(db, 1) == 0

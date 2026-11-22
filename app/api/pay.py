@@ -14,6 +14,7 @@ from app.services.orders import (
     InvalidOrderState,
     NotPurchasable,
     OrderNotFound,
+    PaymentAmountMismatch,
     cancel_order,
     confirm_payment,
     create_order,
@@ -131,8 +132,12 @@ def sync(request: Request, body: dict, db: Session = Depends(get_db)):
             db,
             order_no=order_no,
             event_id=str(event_id),
-            paid_amount_fen=int(body["paid_amount_fen"]),
+            # Pass the raw value: the service enforces strict integer fen and
+            # the server-authoritative amount; no float coercion here.
+            paid_amount_fen=body["paid_amount_fen"],
         )
+    except PaymentAmountMismatch as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="invalid callback payload") from exc
     except InvalidOrderState as exc:
