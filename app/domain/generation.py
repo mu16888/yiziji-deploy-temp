@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from app.adapters.generation import GenerationAdapter, get_adapter
 from app.domain.ledger import InsufficientCredits, append_entry, reserve, settle
 from app.models import GenerationJob
-from app.services.compliance import mark_aigc
+from app.services.compliance import AIGC_GENERATE_ACTION, mark_aigc, record_audit
 
 QUEUED = "queued"
 RUNNING = "running"
@@ -210,6 +210,14 @@ def complete_job(
             job.status = SUCCEEDED
             job.actual_credits = actual
             job.result = marked
+            audit = record_audit(
+                db,
+                actor_id=job.user_id,
+                action=AIGC_GENERATE_ACTION,
+                payload={**marked, "job_id": job.id},
+            )
+            audit.job_id = job.id
+            audit.user_id = job.user_id
         db.commit()
     except Exception:
         db.rollback()
