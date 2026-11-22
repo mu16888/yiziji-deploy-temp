@@ -71,6 +71,8 @@
     const quizProgressEl = document.getElementById('quiz-progress');
     let idx = 0;
     let answeredCount = 0;
+    let quizWired = false;   // option listeners attach only once
+    const quizResolved = []; // per-question answered flag, cleared on re-entry
 
     function render() {
       const s = scenes[idx] || {};
@@ -112,42 +114,62 @@
     document.getElementById('quiz-start').addEventListener('click', function () {
       const box = document.getElementById('quiz-box');
       box.hidden = false;
+      // Wire option clicks only once. Re-attaching on every 进入测验 click gave
+      // each button two listeners with independent resolved flags, so one answer
+      // incremented the counter twice (review finding).
+      if (!quizWired) {
+        quizWired = true;
+        Array.prototype.forEach.call(box.querySelectorAll('.quiz-item'), function (item) {
+          const i = parseInt(item.getAttribute('data-qindex'), 10);
+          const q = quiz[i];
+          if (!q || typeof q === 'string') return; // legacy string quiz: question text only
+          const opts = item.querySelectorAll('.quiz-option');
+          const explainEl = item.querySelector('.quiz-explain');
+          Array.prototype.forEach.call(opts, function (btn) {
+            btn.addEventListener('click', function () {
+              if (quizResolved[i]) return;
+              quizResolved[i] = true;
+              const oi = parseInt(btn.getAttribute('data-index'), 10);
+              const ans = Number(q.answer); // tolerate a string answer index
+              const correct = oi === ans;
+              btn.classList.add(correct ? 'correct' : 'wrong');
+              const mark = document.createElement('span');
+              mark.className = 'quiz-result-mark';
+              mark.textContent = correct ? ' ✓' : ' ✗';
+              btn.appendChild(mark);
+              if (!correct && opts[ans]) {
+                opts[ans].classList.add('correct');
+              }
+              if (explainEl && q.explain) {
+                const prefix = correct ? '回答正确！' : ('正确答案：' + (ans + 1) + '。');
+                explainEl.textContent = prefix + ' ' + q.explain;
+                explainEl.hidden = false;
+              }
+              answeredCount += 1;
+              updateQuizProgress();
+            });
+          });
+        });
+      }
+      // Every entry starts clean: progress, resolved flags, marks, correct/wrong
+      // classes and explain text/label are all reset (re-entry after answering).
       answeredCount = 0;
       updateQuizProgress();
-      // Options are server-rendered; wire up click -> compare with q.answer ->
-      // show ✓/✗ + q.explain, and advance the dynamic quiz-progress counter.
       Array.prototype.forEach.call(box.querySelectorAll('.quiz-item'), function (item) {
         const i = parseInt(item.getAttribute('data-qindex'), 10);
         const q = quiz[i];
-        if (!q || typeof q === 'string') return; // legacy string quiz: question text only
-        const opts = item.querySelectorAll('.quiz-option');
-        const explainEl = item.querySelector('.quiz-explain');
-        let resolved = false;
-        Array.prototype.forEach.call(opts, function (btn) {
-          btn.addEventListener('click', function () {
-            if (resolved) return;
-            resolved = true;
-            const oi = parseInt(btn.getAttribute('data-index'), 10);
-            const correct = oi === q.answer;
-            btn.classList.add(correct ? 'correct' : 'wrong');
-            const mark = document.createElement('span');
-            mark.className = 'quiz-result-mark';
-            mark.textContent = correct ? ' ✓' : ' ✗';
-            btn.appendChild(mark);
-            if (!correct && typeof q.answer === 'number' && opts[q.answer]) {
-              opts[q.answer].classList.add('correct');
-            }
-            if (explainEl && q.explain) {
-              const prefix = correct
-                ? '回答正确！'
-                : ('正确答案：' + (typeof q.answer === 'number' ? (q.answer + 1) : q.answer) + '。');
-              explainEl.textContent = prefix + ' ' + q.explain;
-              explainEl.hidden = false;
-            }
-            answeredCount += 1;
-            updateQuizProgress();
+        quizResolved[i] = false;
+        Array.prototype.forEach.call(item.querySelectorAll('.quiz-option'), function (btn) {
+          btn.classList.remove('correct', 'wrong');
+          Array.prototype.forEach.call(btn.querySelectorAll('.quiz-result-mark'), function (mark) {
+            mark.remove();
           });
         });
+        const explainEl = item.querySelector('.quiz-explain');
+        if (explainEl) {
+          explainEl.hidden = true;
+          explainEl.textContent = (q && typeof q === 'object' && q.explain) ? q.explain : '';
+        }
       });
     });
     render();

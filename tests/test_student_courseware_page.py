@@ -170,6 +170,37 @@ def test_quiz_renders_options_and_answer_logic():
     assert "quiz-progress" in html
 
 
+def test_double_quiz_start_does_not_double_count():
+    """Review regression: clicking 开始答题 twice then answering once -> 1/N, not 2/N.
+
+    The finding was that every click re-attached option listeners (two independent
+    ``resolved`` flags) while resetting the counter, so one answer double-counted
+    and re-entry left stale ✓/✗ marks. Guard + full reset prevent it; this test
+    locks those invariants in the rendered page script.
+    """
+    with serving(_real_courseware(), REAL_SHARE_CODE) as client:
+        r = client.get(f"/c/{REAL_SHARE_CODE}")
+    assert r.status_code == 200, r.text[:200]
+    html = r.text
+
+    # Option listeners attach only once (one-time wiring guard).
+    assert "let quizWired = false" in html
+    assert "if (!quizWired) {" in html
+    assert "quizWired = true" in html
+
+    # Every entry is a clean reset: counter, per-question resolved flag, marks,
+    # correct/wrong classes and explain text/label.
+    assert "answeredCount = 0;" in html
+    assert "quizResolved[i] = false" in html
+    assert "btn.classList.remove('correct', 'wrong')" in html
+    assert "mark.remove()" in html
+    assert "explainEl.hidden = true" in html
+
+    # Progress advances from a single increment site; answer index is normalized.
+    assert html.count("answeredCount += 1") == 1
+    assert "Number(q.answer)" in html
+
+
 # --- backward compatibility: old string-shaped mock still works --------------
 
 
