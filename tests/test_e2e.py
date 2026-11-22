@@ -106,19 +106,17 @@ def _assert_deployment_and_docs(root: Path) -> None:
         "alembic upgrade head",  # required workflow order
         "python scripts/seed.py",
         "GENERATION_ADAPTER",  # swap model
-        "OPENMAIC_URL",
+        "DEEPSEEK_API_KEY",  # self-owned generation, replaceable LLM
+        "DEEPSEEK_BASE_URL",
+        "DEEPSEEK_MODEL",
+        "Courseware",
+        "自有生成",
         "PAYMENT_GATEWAY",  # swap payment
         "WECHAT_",
         "docker compose",  # deployment
         "nginx",
-        "OpenMAIC",  # compliance notes
-        "MIT",
-        "LGPL",
-        "mathml2omml",
-        "pptxgenjs",
-        "清华",  # no THU endorsement
-        "SELF_REFERRAL_CHECK",
         "AIGC_LABEL",
+        "SELF_REFERRAL_CHECK",
         "AUDIT_RETENTION_DAYS",
         "SHARE_LINK_TTL_DAYS",
         "DATABASE_URL",
@@ -126,6 +124,9 @@ def _assert_deployment_and_docs(root: Path) -> None:
         "分",  # money in fen
     ):
         assert token in readme, f"README missing required topic: {token}"
+
+    for banned in ("openmaic", "清华", "thu", "lgpl", "mathml2omml", "pptxgenjs"):
+        assert banned not in readme.lower(), f"README still mentions rejected direction: {banned}"
 
     compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
     assert "nginx" in compose and "app:" in compose
