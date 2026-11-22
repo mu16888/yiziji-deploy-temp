@@ -1,0 +1,18 @@
+{% extends "admin/base.html" %}
+{% block title %}提现审核 · 管理后台{% endblock %}
+{% block content %}
+<h2>提现审核</h2>
+<table>
+  <thead><tr><th>ID</th><th>用户</th><th>金额（分）</th><th>状态</th><th>审核时间</th></tr></thead>
+  <tbody>
+  {% for w in withdrawals %}
+    <tr>
+      <td>{{ w.id }}</td><td>{{ w.user_id }}</td><td>{{ w.amount_fen }}</td>
+      <td>{{ w.status }}</td><td>{{ w.reviewed_at or '' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">暂无提现申请</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

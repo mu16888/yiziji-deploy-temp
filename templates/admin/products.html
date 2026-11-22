@@ -1,0 +1,18 @@
+{% extends "admin/base.html" %}
+{% block title %}商品 · 管理后台{% endblock %}
+{% block content %}
+<h2>商品配置</h2>
+<table>
+  <thead><tr><th>SKU</th><th>名称</th><th>价格（分）</th><th>积分</th><th>上架</th></tr></thead>
+  <tbody>
+  {% for p in products %}
+    <tr>
+      <td>{{ p.sku }}</td><td>{{ p.name }}</td>
+      <td>{{ p.amount_fen }}</td><td>{{ p.credits }}</td><td>{{ '是' if p.active else '否' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5">暂无商品</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

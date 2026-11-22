@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+{% block title %}统计看板 · 管理后台{% endblock %}
+{% block content %}
+<h2>统计看板</h2>
+<div class="cards">
+  <div class="card">注册数<b>{{ stats.registered_users }}</b></div>
+  <div class="card">付费用户<b>{{ stats.paid_users }}</b></div>
+  <div class="card">付费额（分）<b>{{ stats.paid_amount_fen }}</b></div>
+  <div class="card">积分消耗<b>{{ stats.credits_consumed }}</b></div>
+  <div class="card">待结算佣金（分）<b>{{ stats.pending_commission_fen }}</b></div>
+  <div class="card">待审提现<b>{{ stats.pending_withdrawals }}</b></div>
+</div>
+{% endblock %}
