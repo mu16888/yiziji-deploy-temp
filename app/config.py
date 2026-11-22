@@ -44,5 +44,10 @@ class Settings(BaseSettings):
     openmaic_url: str = ""
     worker_poll_sec: int = 5
 
+    # DeepSeek LLM (self-owned generation; replaceable backend)
+    deepseek_api_key: str = ""
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-chat"
+
 
 settings = Settings()
