@@ -17,6 +17,8 @@ dependencies = [
     "httpx",
     "jinja2",
     "python-multipart",
+    "pypdf",
+    "python-docx",
 ]
 
 [tool.setuptools.packages.find]
