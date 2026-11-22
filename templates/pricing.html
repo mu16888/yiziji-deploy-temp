@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>价格 · AI 互动课堂</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #f6f7fb; margin: 0; color: #1f2430; }
+    main { max-width: 1040px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 28px; margin-bottom: 8px; }
+    .lead { color: #5c6270; margin-bottom: 28px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
+    .card { background: #fff; border: 1px solid #e5e7ee; border-radius: 12px; padding: 22px; box-shadow: 0 6px 20px rgba(0,0,0,.04); }
+    .card.featured { border-color: #4b6bfb; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+    h2 { font-size: 18px; margin: 0; }
+    .tag { font-size: 12px; color: #6b7280; background: #f1f2f7; border-radius: 10px; padding: 2px 8px; }
+    .desc { color: #6b7280; font-size: 13px; min-height: 18px; }
+    .price { font-size: 30px; font-weight: 700; color: #2b3245; margin: 12px 0 4px; }
+    .badge { display: inline-block; font-size: 12px; color: #0a7f37; background: #e7f7ee; border-radius: 10px; padding: 2px 8px; margin: 0 0 6px; }
+    .original { color: #9ca3af; font-size: 13px; text-decoration: line-through; margin: 0 0 8px; }
+    ul { list-style: none; padding: 0; margin: 8px 0 0; font-size: 13px; color: #4b5162; }
+    li { padding: 4px 0; }
+    .ok { color: #0a7f37; }
+    .no { color: #b45309; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>选择适合你的方案</h1>
+    <p class="lead">所有价格由服务端按你的账号状态实时计算，复购自动享受专属价格；无需客户端参与计价。</p>
+    <div class="grid">
+      {% for p in products %}
+      <article class="card {{ 'featured' if p.type == 'package' else '' }}">
+        <header>
+          <h2>{{ p.name }}</h2>
+          <span class="tag">{{ p.type }}</span>
+        </header>
+        {% if p.description %}<p class="desc">{{ p.description }}</p>{% endif %}
+        <p class="price">¥{{ p.amount_yuan }}</p>
+        {% if p.repurchase %}<p class="badge">复购专享价</p>{% endif %}
+        {% if p.original_amount_yuan and p.original_amount_yuan != p.amount_yuan %}
+        <p class="original">原价 ¥{{ p.original_amount_yuan }}</p>
+        {% endif %}
+        <ul>
+          <li>到账积分：{{ p.credits }}</li>
+          <li class="{{ 'ok' if p.eligible else 'no' }}">{{ '可购买' if p.eligible else '暂不可购买' }}</li>
+          {% if p.locks_attribution %}<li>下单即锁定推广归属</li>{% endif %}
+          {% if not p.cash_commission %}<li>本商品不产生现金佣金</li>{% endif %}
+        </ul>
+      </article>
+      {% else %}
+      <p>暂无在售商品。</p>
+      {% endfor %}
+    </div>
+  </main>
+</body>
+</html>
