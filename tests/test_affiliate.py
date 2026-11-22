@@ -32,6 +32,7 @@ from app.services.auth import issue_token
 from app.services.affiliate import (
     AgentActivationError,
     BelowMinimumWithdrawal,
+    InsufficientAgentFund,
     InsufficientWithdrawableBalance,
     ReferrerNotFound,
     activate_agent,
@@ -437,3 +438,73 @@ def test_api_promote_summary_bind_and_withdraw_validation(db, client):
         headers=auth_headers(promo_user),
     )
     assert r.status_code == 400
+
+
+# --- review-fix regressions --------------------------------------------------
+
+
+def test_self_referral_199_no_invite_credits(db):
+    """Important #1: own-code ¥199 purchases must not mint invite credits or eat the cap."""
+    self_user = make_user(db, invite_code="TCH-SELF199")
+    promoter = Promoter(user_id=self_user.id, level="basic", code="TCH-SELF199")
+    db.add(promoter)
+    db.flush()
+    bind_referrer(db, user_id=self_user.id, code="TCH-SELF199")
+    confirm_attribution(db, user_id=self_user.id)
+
+    for n in range(3):
+        paid_order(db, self_user, NEWCOMER, event_id=f"e{n}")
+
+    assert (
+        db.query(CreditEntry)
+        .filter_by(user_id=self_user.id, ref_type="invite_bonus")
+        .count()
+        == 0
+    )
+    assert db.query(Promoter).filter_by(user_id=self_user.id).one().invited_count == 0
+    assert db.query(CommissionEntry).filter_by(user_id=self_user.id).count() == 0
+
+
+def test_expired_candidate_no_commission(db):
+    """Important #2: candidate_at is the 90-day clock; confirmation never resets it."""
+    promo_user, _ = make_promoter(db, code="TCH-EXPIRED", level="basic")
+    customer = make_user(db)
+    attribution = bind_referrer(db, user_id=customer.id, code="TCH-EXPIRED")
+    attribution.candidate_at = utcnow() - timedelta(days=91)
+    db.flush()
+    confirm_attribution(db, user_id=customer.id)
+    stored = db.query(Attribution).filter_by(user_id=customer.id).one()
+    assert stored.confirmed_at is not None  # confirmed, but stale
+
+    order = paid_order(db, customer, PERSONAL)
+    assert db.query(Attribution).filter_by(user_id=customer.id).one().locked_at is None
+    assert commission_for_order(db, order.no) == []
+
+
+def test_agent_fund_never_negative(db):
+    """Important #3: a 代开 order with too little fund must be rejected, not go negative."""
+    agent_user, agent = make_agent(db, fund_fen=20000)  # 200 < 419.40 needed
+    product = db.query(Product).filter_by(sku=PERSONAL).one()
+    order = Order(
+        no="ORD-AGENCY-POOR",
+        user_id=agent_user.id,
+        product_id=product.id,
+        sku=PERSONAL,
+        amount_fen=69900,
+        paid_amount_fen=69900,
+        status="paid",
+        channel="agent_fund",
+        paid_at=utcnow(),
+        idempotency_key="order:ORD-AGENCY-POOR",
+    )
+    db.add(order)
+    db.flush()
+
+    with pytest.raises(InsufficientAgentFund):
+        apply_order_commission(db, order=order)
+
+    rows = db.query(AgentFundEntry).filter_by(agent_id=agent.id).all()
+    assert len(rows) == 1  # only the opening balance row
+    assert rows[0].delta_fen == 20000
+    assert agent.fund_fen == 20000
+    assert commission_for_order(db, order.no) == []

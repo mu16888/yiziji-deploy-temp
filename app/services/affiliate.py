@@ -28,6 +28,7 @@ from app.domain.commission import (
     INVITE_BONUS_CREDITS,
     NO_CASH_COMMISSION_SKUS,
     ACTIVE_ORDER_STATUSES,
+    InsufficientAgentFund,
     compute_commission,
     is_agency_order,
     is_self_referral,
@@ -186,6 +187,10 @@ def _lock_attribution(db: Session, attribution: Attribution, order: Order) -> No
     """Lock the long-term unique owner on the first valid package order."""
     if is_locked(attribution) or not is_valid_order(order):
         return
+    # candidate_at is the authoritative 90-day clock; confirming does not reset
+    # it, so a stale candidate can never acquire a long-term lock.
+    if is_candidate_expired(attribution.candidate_at):
+        return
     product = (
         db.get(Product, order.product_id)
         if order.product_id is not None
@@ -304,7 +309,13 @@ def _debit_agency_fund(db: Session, order: Order) -> None:
     )
     official = int(product.amount_fen) if product is not None else int(order.amount_fen)
     debit = -(official * AGENCY_FUND_DEBIT_PERCENT // 100)
-    balance = _agent_fund_balance(db, agent.id) + debit
+    current = _agent_fund_balance(db, agent.id)
+    balance = current + debit
+    if balance < 0:
+        # Never write a negative fund row; reject the order for top-up instead.
+        raise InsufficientAgentFund(
+            f"agent fund {current} fen cannot cover {abs(debit)} fen for {order.no}"
+        )
     db.add(
         AgentFundEntry(
             agent_id=agent.id,
@@ -326,7 +337,8 @@ def apply_order_commission(db: Session, *, order: Order) -> list[CommissionEntry
 
     Returns the newly created (or previously existing) commission entries.
     Agency and agent-admission orders pay no commission; the ¥199 package
-    locks attribution and grants invite credits but pays no cash.
+    locks attribution and grants invite credits but pays no cash. Expired or
+    self-referred attributions earn nothing at all.
     """
     if is_agency_order(order):
         _debit_agency_fund(db, order)
@@ -340,17 +352,23 @@ def apply_order_commission(db: Session, *, order: Order) -> list[CommissionEntry
     attribution = db.query(Attribution).filter_by(user_id=order.user_id).first()
     if attribution is None or not is_confirmed(attribution):
         return []
+    # candidate_at is the authoritative clock: a confirmed-but-stale candidate
+    # can neither lock nor accrue (confirmation never resets the 90 days).
+    if is_candidate_expired(attribution.candidate_at):
+        return []
     _lock_attribution(db, attribution, order)
     if not is_locked(attribution):
         return []
 
-    if order.sku in NO_CASH_COMMISSION_SKUS:
-        _grant_invite_bonus(db, attribution, order)
-        return []
-
+    # Self-dealing is rejected before the ¥199 branch so it suppresses invite
+    # credits as well as cash commission (and never consumes the 20-invite cap).
     customer = db.get(User, order.user_id)
     inviter = db.get(User, attribution.inviter_id) if attribution.inviter_id else None
     if is_self_referral(customer, inviter, settings.self_referral_check):
+        return []
+
+    if order.sku in NO_CASH_COMMISSION_SKUS:
+        _grant_invite_bonus(db, attribution, order)
         return []
 
     # A member who becomes an agent is independent: no upline commission.

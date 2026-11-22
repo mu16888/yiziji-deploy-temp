@@ -38,6 +38,10 @@ ACTIVE_ORDER_STATUSES = frozenset({"paid", "fulfilled"})
 REFUND_STATUSES = frozenset({"refunding", "refunded"})
 
 
+class InsufficientAgentFund(Exception):
+    """Raised when an agency (代开) order would drive the agent fund negative."""
+
+
 @dataclass(frozen=True)
 class CommissionSplit:
     """Result of the §5.6 formula, all in 分."""
