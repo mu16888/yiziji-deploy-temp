@@ -11,7 +11,10 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from pptx import Presentation
-from pptx.util import Inches
+from pptx.dml.color import RGBColor
+from pptx.enum.dml import MSO_FILL
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Inches, Pt
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -26,6 +29,10 @@ from app.services.export import build_pptx
 PPTX_MEDIA_TYPE = (
     "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 )
+
+DEEP_BLUE = RGBColor(0x0F, 0x2A, 0x47)
+GOLD = RGBColor(0xC9, 0xA2, 0x27)
+CREAM = RGBColor(0xF7, 0xF4, 0xEC)
 
 COURSEWARE = {
     "version": "1.0",
@@ -140,6 +147,18 @@ def _slide_text(slide) -> str:
     )
 
 
+def _solid_shapes(slide):
+    return [
+        shape for shape in slide.shapes
+        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE
+        and shape.fill.type == MSO_FILL.SOLID
+    ]
+
+
+def _has_color(slide, rgb) -> bool:
+    return any(shape.fill.fore_color.rgb == rgb for shape in _solid_shapes(slide))
+
+
 # --- pure builder -------------------------------------------------------------
 
 
@@ -148,6 +167,53 @@ def test_build_pptx_is_4_3():
     assert prs.slide_width == Inches(10)
     assert prs.slide_height == Inches(7.5)
     assert prs.slide_width / prs.slide_height == pytest.approx(4 / 3)
+
+
+def test_long_bullets_use_smaller_font():
+    """Long bullets shrink font size so text stays inside the 4:3 slide."""
+    short = {"title": "短", "scenes": [{"title": "s", "bullets": ["短要点"]}]}
+    long = {"title": "长", "scenes": [{"title": "s", "bullets": ["很长的要点" * 80]}]}
+
+    def first_body_font(cw):
+        prs = Presentation(io.BytesIO(build_pptx(cw)))
+        for shape in prs.slides[1].shapes:
+            if not shape.has_text_frame:
+                continue
+            for para in shape.text_frame.paragraphs:
+                if para.runs and para.runs[0].text.startswith("●"):
+                    return para.runs[-1].font.size  # body run, not the gold marker
+        raise AssertionError("no bullet body text found")
+
+    assert first_body_font(long) <= first_body_font(short)
+    assert first_body_font(long) <= Pt(15)
+
+
+def test_cover_uses_deep_blue_and_gold():
+    cover = Presentation(io.BytesIO(build_pptx(COURSEWARE))).slides[0]
+    full_bleed = [
+        shape for shape in _solid_shapes(cover)
+        if shape.fill.fore_color.rgb == DEEP_BLUE
+        and shape.width == Inches(10) and shape.height == Inches(7.5)
+    ]
+    assert full_bleed, "cover needs a full-bleed deep-blue background"
+    assert _has_color(cover, GOLD), "cover needs a gold accent"
+    assert "一元二次方程" in _slide_text(cover)
+
+
+def test_scene_has_title_band_and_gold_sequence():
+    slide = Presentation(io.BytesIO(build_pptx(COURSEWARE))).slides[1]
+    assert _has_color(slide, CREAM), "scene needs its cream background"
+    band = [
+        shape for shape in _solid_shapes(slide)
+        if shape.fill.fore_color.rgb == DEEP_BLUE and shape.height == Inches(1.1)
+    ]
+    assert band, "scene needs a deep-blue title band"
+    bar = [
+        shape for shape in _solid_shapes(slide)
+        if shape.fill.fore_color.rgb == GOLD and shape.height == Inches(1.1)
+    ]
+    assert bar, "title band needs a gold vertical bar"
+    assert "01 / 02" in _slide_text(slide), "gold sequence number missing"
 
 
 def test_build_pptx_scenes_and_notes():
