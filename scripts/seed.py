@@ -20,16 +20,27 @@ from app.models.base import utcnow
 
 DEFAULT_SKUS = frozenset(
     {
+        "pkg_starter_9",
         "pkg_newcomer_experience_199",
         "pkg_personal_699",
         "pkg_team_1999",
         "pkg_enterprise_collab_3999",
-        "svc_voice_clone_299",
         "agent_admission_9999",
     }
 )
 
 PRODUCTS = (
+    {
+        "sku": "pkg_starter_9",
+        "name": "体验包",
+        "type": "package",
+        "amount_fen": 990,
+        "original_amount_fen": None,
+        "credits": 100,
+        "bonuses": {},
+        "eligibility": {},
+        "sort": 0,
+    },
     {
         "sku": "pkg_newcomer_experience_199",
         "name": "新人体验包",
@@ -73,17 +84,6 @@ PRODUCTS = (
         "bonuses": {"seats": 10, "org": True, "promoter_level": "advanced"},
         "eligibility": {},
         "sort": 4,
-    },
-    {
-        "sku": "svc_voice_clone_299",
-        "name": "专属音色复刻",
-        "type": "service",
-        "amount_fen": 29900,
-        "original_amount_fen": None,
-        "credits": 0,
-        "bonuses": {},
-        "eligibility": {},
-        "sort": 5,
     },
     {
         "sku": "agent_admission_9999",

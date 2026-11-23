@@ -22,6 +22,15 @@ _REFUND_STATUSES = frozenset({"refunding", "refunded"})
 _NO_CASH_COMMISSION_SKUS = frozenset({"pkg_newcomer_experience_199"})
 _ATTRIBUTION_LOCKING_TYPES = frozenset({"package"})
 
+# SKUs that are real/backed by a backend but must not be advertised on the
+# pricing page. Agent admission belongs in the promoter centre, and the voice
+# clone service has no implementation. This hides them from /pricing and
+# /api/catalog/products only: get_price intentionally stays untouched so
+# admins and agent flows can still purchase these SKUs directly by sku.
+HIDDEN_FROM_PRICING_SKUS = frozenset(
+    {"agent_admission_9999", "svc_voice_clone_299"}
+)
+
 _GRANT_ACTION = "bonus:grant"
 _REVOKE_ACTION = "bonus:revoke"
 
@@ -143,6 +152,7 @@ def list_products(db: Session, user: User) -> list[ProductView]:
     products = (
         db.query(Product)
         .filter(Product.active.is_(True))
+        .filter(Product.sku.notin_(HIDDEN_FROM_PRICING_SKUS))
         .order_by(Product.sort, Product.id)
         .all()
     )

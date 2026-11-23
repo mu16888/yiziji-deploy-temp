@@ -178,11 +178,13 @@ def test_list_products_exposes_server_prices_and_repurchase_flag(db):
 
 
 def test_list_products_hides_inactive_products(db):
+    # The retired voice-clone SKU is no longer seeded, so use a live package to
+    # keep this coverage meaningful: inactive products must never be listed.
     u = make_user(db)
-    product = db.query(Product).filter_by(sku="svc_voice_clone_299").one()
+    product = db.query(Product).filter_by(sku="pkg_starter_9").one()
     product.active = False
     db.commit()
-    assert "svc_voice_clone_299" not in {p.sku for p in list_products(db, u)}
+    assert "pkg_starter_9" not in {p.sku for p in list_products(db, u)}
 
 
 # --- apply_bonuses -----------------------------------------------------------
@@ -303,3 +305,67 @@ def test_pricing_page_is_public(db, client):
     r = client.get("/pricing")
     assert r.status_code == 200, r.text
     assert "699.00" in r.text  # list price for anonymous visitors
+
+
+# --- pricing/page adjustments ------------------------------------------------
+
+
+def test_hidden_skus_not_listed(db):
+    """Agent admission and the retired voice clone never appear for sale."""
+    # Simulate the live DB, which may still carry the retired voice SKU even
+    # though the seed no longer creates it. The filter must work either way.
+    if db.query(Product).filter_by(sku="svc_voice_clone_299").first() is None:
+        db.add(
+            Product(
+                sku="svc_voice_clone_299",
+                name="专属音色复刻",
+                type="service",
+                amount_fen=29900,
+                original_amount_fen=None,
+                credits=0,
+                bonuses={},
+                eligibility={},
+                sort=5,
+                active=True,
+            )
+        )
+        db.commit()
+
+    listed = {p.sku for p in list_products(db, make_user(db))}
+    assert AGENT_SKU not in listed
+    assert "svc_voice_clone_299" not in listed
+    # Real, visible packages (including the new entry tier) stay listed.
+    assert NEWCOMER in listed
+    assert "pkg_starter_9" in listed
+
+
+def test_hidden_skus_still_purchasable_by_sku(db):
+    """Hiding a SKU from the pricing page must not break direct purchase."""
+    u = make_user(db)
+    quote = get_price(db, AGENT_SKU, u)
+    assert quote.amount_fen == 999900
+    assert quote.eligible is True
+
+    # Even the retired voice SKU remains resolvable if a live DB still has it.
+    if db.query(Product).filter_by(sku="svc_voice_clone_299").first() is None:
+        db.add(
+            Product(
+                sku="svc_voice_clone_299",
+                name="专属音色复刻",
+                type="service",
+                amount_fen=29900,
+                credits=0,
+                bonuses={},
+                eligibility={},
+                sort=5,
+            )
+        )
+        db.commit()
+    assert get_price(db, "svc_voice_clone_299", u).amount_fen == 29900
+
+
+def test_pricing_page_shows_free_banner(db, client):
+    r = client.get("/pricing")
+    assert r.status_code == 200, r.text
+    assert "100 积分" in r.text
+    assert "免费" in r.text

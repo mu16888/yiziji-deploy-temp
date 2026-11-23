@@ -9,6 +9,8 @@
     main { max-width: 1040px; margin: 40px auto; padding: 0 20px; }
     h1 { font-size: 28px; margin-bottom: 8px; color: #0F2A47; }
     .lead { color: #6B7280; margin-bottom: 28px; }
+    .free-banner { background: linear-gradient(100deg, #0F2A47 0%, #1B3E5C 100%); border: 1px solid #C9A227; border-left: 5px solid #C9A227; color: #F7F4EC; border-radius: 12px; padding: 16px 22px; margin: 0 0 26px; font-size: 16px; font-weight: 600; line-height: 1.6; box-shadow: 0 6px 20px rgba(15,42,71,.14); }
+    .free-banner strong { color: #E8D08D; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 18px; }
     .card { background: #fff; border: 1px solid rgba(15,42,71,.14); border-top: 2px solid #C9A227; border-radius: 12px; padding: 22px; box-shadow: 0 6px 20px rgba(15,42,71,.06); }
     .card.featured { border-color: #C9A227; box-shadow: 0 8px 26px rgba(201,162,39,.22); }
@@ -29,6 +31,9 @@
   <main>
     <h1>选择适合你的方案</h1>
     <p class="lead">所有价格由服务端按你的账号状态实时计算，复购自动享受专属价格；无需客户端参与计价。</p>
+    <div class="free-banner" role="status">
+      🎉 新用户注册即送 <strong>100 积分</strong>（约可生成 10 套课件），<strong>先免费体验</strong>再决定 ✨
+    </div>
     <div class="grid">
       {% for p in products %}
       <article class="card {{ 'featured' if p.type == 'package' else '' }}">

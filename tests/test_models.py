@@ -114,3 +114,16 @@ def test_seed_is_idempotent(db):
         db.query(Role).count(),
         db.query(User).count(),
     ) == first_counts
+
+
+def test_starter_sku_seeded(db):
+    """The ¥9.9 / 100-credit entry package is part of the default catalogue."""
+    seed(db)
+    product = db.query(Product).filter_by(sku="pkg_starter_9").one()
+    assert product.name == "体验包"
+    assert product.type == "package"
+    assert product.amount_fen == 990
+    assert product.credits == 100
+    assert product.sort == 0
+    assert product.bonuses == {}
+    assert product.active is True
