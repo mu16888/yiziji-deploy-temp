@@ -80,9 +80,25 @@ class DeepSeekGenerationAdapter:
         external_id = f"ds-{getattr(job, 'id', '')}"
         try:
             spec = spec or {}
-            text = spec.get("material_text") or spec.get("text") or _DEFAULT_MATERIAL
+            topic = str(spec.get("topic") or "").strip()
+            # Prefer real material; otherwise generate AROUND the teacher's topic
+            # so a topic like "父母怎么教育孩子" does not fall back to the demo
+            # quadratic-equation lecture.
+            material = spec.get("material_text") or spec.get("text")
+            if material:
+                text = str(material)
+                if topic:
+                    text = f"教学主题：{topic}\n\n参考资料：\n{text}"
+            elif topic:
+                text = (
+                    f"请围绕以下教学主题，设计一套完整、可讲解、带随堂测验的课件内容。\n"
+                    f"教学主题：{topic}\n"
+                    f"要求：内容必须紧扣该主题，不要使用任何无关的示例（尤其是数学示例，除非主题本身是数学）。"
+                )
+            else:
+                text = _DEFAULT_MATERIAL
             courseware = build_courseware(
-                str(text),
+                text,
                 self.client,
                 subject=str(spec.get("subject") or ""),
                 grade=str(spec.get("grade") or ""),
