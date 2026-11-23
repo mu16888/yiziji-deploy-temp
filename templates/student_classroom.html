@@ -9,21 +9,33 @@
 <body class="student">
   <header class="topbar">
     <span class="brand">互动课堂 · {{ title }}</span>
-    {% if aigc_label %}<span class="tag">本内容由 AI 生成，请理性辨别</span>{% endif %}
+    <span class="topbar-actions">
+      {% if aigc_label %}<span class="tag">本内容由 AI 生成，请理性辨别</span>{% endif %}
+      <a class="support-link" href="tencent://message/?uin=1545627058&Site=&Menu=yes" title="遇到问题？QQ 客服 1545627058">QQ 客服 1545627058</a>
+    </span>
   </header>
   <main class="container student-main">
     <div class="card scene-card">
       <p class="hint">当前场景：<span id="scene-kind">幻灯片 / 互动模拟</span></p>
-      <h2 id="scene-title">
-        {% if scenes %}{{ scenes[0].get('title') if scenes[0] is mapping else scenes[0] }}{% else %}讲师讲解 + 白板绘图{% endif %}
-      </h2>
-      <!-- narration is the main text of a real Courseware scene; `body` is the legacy mock field. -->
-      <p class="scene-narration" id="scene-narration">{% if scenes and scenes[0] is mapping %}{{ scenes[0].get('narration') or scenes[0].get('body') or '' }}{% endif %}</p>
-      <ul class="scene-bullets" id="scene-bullets">
-        {% if scenes and scenes[0] is mapping %}
-          {% for b in (scenes[0].get('bullets') or []) %}<li>{{ b }}</li>{% endfor %}
-        {% endif %}
-      </ul>
+      <!-- 4:3 white slide, mirroring the exported PPTX: title + bullets only. -->
+      <div class="slide-stage">
+        <div class="slide-content">
+          <h2 id="scene-title">
+            {% if scenes %}{{ scenes[0].get('title') if scenes[0] is mapping else scenes[0] }}{% else %}讲师讲解 + 白板绘图{% endif %}
+          </h2>
+          <ul class="scene-bullets" id="scene-bullets">
+            {% if scenes and scenes[0] is mapping %}
+              {% for b in (scenes[0].get('bullets') or []) %}<li>{{ b }}</li>{% endfor %}
+            {% endif %}
+          </ul>
+        </div>
+      </div>
+      <!-- Speaker notes (PPT 备注): narration sits BELOW the slide, never on it.
+           `narration` is the main text of a real scene; `body` is the legacy mock field. -->
+      <div class="speaker-notes">
+        <span class="speaker-notes-label">讲稿</span>
+        <p class="scene-narration" id="scene-narration">{% if scenes and scenes[0] is mapping %}{{ scenes[0].get('narration') or scenes[0].get('body') or '' }}{% endif %}</p>
+      </div>
       <p class="hint scene-visual-hint" id="scene-visual-hint"{% if not (scenes and scenes[0] is mapping and scenes[0].get('visual_hint')) %} hidden{% endif %}>{% if scenes and scenes[0] is mapping %}{{ scenes[0].get('visual_hint') or '' }}{% endif %}</p>
       <div class="scene-nav">
         <button class="btn" type="button" id="prev">上一页</button>

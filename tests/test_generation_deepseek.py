@@ -160,6 +160,25 @@ def test_default_text_when_spec_has_no_text():
     assert adapter.status(eid) == "succeeded"
 
 
+def test_topic_drives_generation():
+    """A topic-only spec must steer generation around that topic, not the demo math lecture.
+
+    Regression: 备课页 submits only {type, topic, voice}; without this the adapter
+    fell back to _DEFAULT_MATERIAL (a quadratic-equation lecture), so ANY topic
+    generated a math class. The topic must reach every LLM call and the default
+    material must NOT leak in.
+    """
+    llm = FakeLLM()
+    adapter = DeepSeekGenerationAdapter(client=llm, store={})
+    topic = "父母怎么教育孩子"
+    eid = adapter.submit(make_job(), {"type": "basic", "topic": topic})
+    assert adapter.status(eid) == "succeeded"
+    # The topic reached the orchestration prompts ...
+    assert llm.calls and any(topic in user for _, user in llm.calls)
+    # ... and the demo math lecture did NOT.
+    assert all("一元二次方程的配方法" not in user for _, user in llm.calls)
+
+
 def test_injected_store_is_used():
     store = {}
     adapter = DeepSeekGenerationAdapter(client=FakeLLM(), store=store)

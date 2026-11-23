@@ -29,6 +29,7 @@
       <p class="hint">本课堂暂无明确场景列表，可直接进入分享设置。</p>
     {% endif %}
     <div class="actions">
+      <a class="btn primary" href="/api/export/{{ job.id }}.pptx">下载 PPT</a>
       <a class="btn" href="/classroom/{{ job.id }}/share">分享设置</a>
       <a class="btn" href="/history">生成历史</a>
     </div>

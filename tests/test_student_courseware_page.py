@@ -13,6 +13,8 @@ rendered HTML (native JS, no build toolchain), plus a browser-free compat case.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from html.parser import HTMLParser
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -26,6 +28,60 @@ from app.models import GenerationJob, User
 
 REAL_SHARE_CODE = "CREAL5"
 STR_SHARE_CODE = "CSTR5"
+CSS_PATH = Path(__file__).resolve().parents[1] / "static" / "app.css"
+
+_VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+}
+
+
+class _DomProbe(HTMLParser):
+    """Tiny DOM tracker: for each id, record its ancestor element classes.
+
+    Lets us assert *structural* placement (narration inside .speaker-notes and
+    outside .slide-stage) instead of relying only on substring order.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, frozenset[str]]] = []
+        self.ancestors: dict[str, list[frozenset[str]]] = {}
+        self.ids: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        d = dict(attrs)
+        classes = frozenset((d.get("class") or "").split())
+        if "id" in d:
+            self.ancestors[d["id"]] = [c for _t, c in self.stack if c]
+            self.ids.append(d["id"])
+        if tag not in _VOID_TAGS:
+            self.stack.append((tag, classes))
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        if tag not in _VOID_TAGS:
+            self.stack.pop()
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, -1, -1):
+            if self.stack[i][0] == tag:
+                del self.stack[i:]
+                return
+
+
+def _probe(html: str) -> _DomProbe:
+    p = _DomProbe()
+    p.feed(html)
+    return p
+
+
+def _rule_block(css: str, selector: str) -> str:
+    """Return the declaration block of the first ``selector { ... }`` rule."""
+    start = css.index(selector)
+    brace = css.index("{", start)
+    end = css.index("}", brace)
+    return css[brace + 1:end]
 
 
 def _real_courseware() -> dict:
@@ -240,3 +296,72 @@ def test_string_scene_and_quiz_compat():
     assert "字符串题目一" in html
     assert "typeof s === 'string'" in html
     assert "typeof q === 'string'" in html
+
+
+# --- PPT-style 4:3 slide + speaker notes -------------------------------------
+
+
+def test_slide_stage_holds_title_and_bullets():
+    """The scene title and bullets sit inside a 4:3 slide frame like a PPT slide."""
+    cw = _real_courseware()
+    with serving(cw, REAL_SHARE_CODE) as client:
+        r = client.get(f"/c/{REAL_SHARE_CODE}")
+    assert r.status_code == 200, r.text[:200]
+    html = r.text
+
+    assert 'class="slide-stage"' in html
+    probe = _probe(html)
+    # The server-rendered slide content (title + bullets) is inside the frame.
+    assert any("slide-stage" in c for c in probe.ancestors["scene-title"])
+    assert any("slide-stage" in c for c in probe.ancestors["scene-bullets"])
+
+    # JS still feeds the same two ids on page flip, so the slide updates.
+    assert "titleEl.textContent" in html
+    assert "bulletsEl.innerHTML" in html
+
+
+def test_narration_lives_in_speaker_notes_outside_the_slide():
+    """Narration is PPT speaker notes: labelled 讲稿, below and outside the slide."""
+    cw = _real_courseware()
+    scene = cw["scenes"][0]
+    with serving(cw, REAL_SHARE_CODE) as client:
+        r = client.get(f"/c/{REAL_SHARE_CODE}")
+    assert r.status_code == 200, r.text[:200]
+    html = r.text
+
+    assert 'class="speaker-notes"' in html
+    assert "讲稿" in html
+    assert scene["narration"] in html
+
+    probe = _probe(html)
+    narration_ancestors = probe.ancestors["scene-narration"]
+    assert any("speaker-notes" in c for c in narration_ancestors)
+    # The core regression: narration must NOT be a descendant of the 4:3 frame.
+    assert not any("slide-stage" in c for c in narration_ancestors)
+    # visual_hint is also kept below the slide, not on it.
+    assert not any("slide-stage" in c for c in probe.ancestors["scene-visual-hint"])
+
+    # The flip handler still updates narration/visual hint by id.
+    assert "narrationEl.textContent" in html
+    assert "visualHintEl.textContent" in html
+
+
+def test_slide_stage_css_is_white_4by3():
+    """Scoped CSS pins the frame to a white 4:3 slide (same geometry as the PPTX)."""
+    css = CSS_PATH.read_text(encoding="utf-8")
+    block = _rule_block(css, ".student .slide-stage")
+    declarations = " ".join(block.split())
+    assert "aspect-ratio: 4/3" in declarations
+    assert "max-width: 900px" in declarations
+    assert "margin: auto" in declarations
+    assert "background: #fff" in declarations
+    assert "color: #1a1a1a" in declarations
+
+
+def test_quiz_remains_outside_the_slide():
+    """The interactive quiz is never swallowed by the 4:3 frame."""
+    with serving(_real_courseware(), REAL_SHARE_CODE) as client:
+        r = client.get(f"/c/{REAL_SHARE_CODE}")
+    assert r.status_code == 200, r.text[:200]
+    probe = _probe(r.text)
+    assert not any("slide-stage" in c for c in probe.ancestors["quiz-box"])
